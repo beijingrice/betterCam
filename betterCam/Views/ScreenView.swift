@@ -57,7 +57,7 @@ struct ScreenView: View {
 
     private func saveNewLUT(data: Data, name: String, dimension: Int) {
         let cleanName = name.isEmpty ? "CUSTOM" : name.uppercased()
-        let newSim = FilmSimulation(name: cleanName, type: .lut, filterName: nil, lutData: data, dimension: dimension)
+        let newSim = FilmSimulation(name: cleanName, type: .lut, filterName: nil, lutData: data, dimension: dimension, isFilm: false)
         
         FilmEngine.shared.availableSimulations.append(newSim)
         

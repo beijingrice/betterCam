@@ -95,7 +95,7 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     }
     // var styleOptions: [String] = ["STD", "RICH", "NOSTALGIC", "BW", "ADD"]
     // TODO: Change it back after ADD function is ready
-    var styleOptions: [String] = ["STD", "RICH", "NOSTALGIC", "BW"]
+    var styleOptions: [String] = []
     @Published var style: String = "STD"
     @Published var imageQuality: String = "DNG+J"
     @Published var aspectRatio: String = "4:3"
@@ -162,13 +162,9 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
         let allNames = FilmEngine.shared.availableSimulations.map { $0.name }
         
         for name in allNames {
-            if name != "STD" && name != "RICH" && name != "NOSTALGIC" && name != "BW" {
-                if !styleOptions.contains(name) {
-                    // TODO: Change it back to ADD
-                    if let addIndex = styleOptions.firstIndex(of: "BW") {
-                        styleOptions.insert(name, at: addIndex)
-                    }
-                }
+            if !styleOptions.contains(name) {
+                // TODO: Change it back to ADD
+                styleOptions.append(name)
             }
         }
     }

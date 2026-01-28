@@ -13,11 +13,13 @@ struct FilmSimulation {
     let filterName: String?
     let lutData: Data?
     let dimension: Int
+    let isFilm: Bool
 }
 
 class FilmEngine: ObservableObject {
     static let shared = FilmEngine()
     private let context = CIContext()
+    private var staticGrainOverlay: CIImage?
     
     // 💡 设为 @Published 确保 UI 拨盘能实时刷新
     @Published var availableSimulations: [FilmSimulation] = []
@@ -29,14 +31,63 @@ class FilmEngine: ObservableObject {
         loadBundleLUTs()
         // 3. 加载用户手动导入并存到沙盒里的 LUT
         loadSavedCustomLUTs()
+        // Get noise generator ready
+        prepareStaticGrain()
     }
+    
+    private func prepareStaticGrain() {
+            let noiseGenerator = CIFilter(name: "CIRandomGenerator")!
+            guard let noise = noiseGenerator.outputImage?.cropped(to: CGRect(x: 0, y: 0, width: 2000, height: 2000)) else { return }
+            
+            // 预设好黑白感、对比度以及基础亮度（EV -3.5 让它若隐若现）
+            let processedNoise = noise
+                .applyingFilter("CIColorControls", parameters: [
+                    kCIInputSaturationKey: 0,
+                    kCIInputContrastKey: 1.1
+                ])
+                .applyingFilter("CIExposureAdjust", parameters: [kCIInputEVKey: -3.5])
+            
+            self.staticGrainOverlay = processedNoise
+        }
+    
+    private func applyFilmGrain(to input: CIImage) -> CIImage {
+            guard let grainLayer = staticGrainOverlay else { return input }
+            
+            // 使用 CIAffineTile 确保纹理填满 input 范围（即使 input 分辨率改变）
+            let tiledGrain = grainLayer
+                .applyingFilter("CIAffineTile")
+                .cropped(to: input.extent)
+
+            // 直接使用 Overlay 混合，性能消耗降到最低
+            return input.applyingFilter("CIOverlayBlendMode", parameters: [
+                kCIInputImageKey: tiledGrain,
+                kCIInputBackgroundImageKey: input
+            ])
+        }
 
     private func setupInitialStyles() {
         self.availableSimulations = [
-            FilmSimulation(name: "STD", type: .builtIn, filterName: nil, lutData: nil, dimension: 0),
-            FilmSimulation(name: "RICH", type: .builtIn, filterName: "CIPhotoEffectInstant", lutData: nil, dimension: 0),
-            FilmSimulation(name: "NOSTALGIC", type: .builtIn, filterName: "CIPhotoEffectTransfer", lutData: nil, dimension: 0),
-            FilmSimulation(name: "BW", type: .builtIn, filterName: "CIPhotoEffectNoir", lutData: nil, dimension: 0)
+            FilmSimulation(name: "STD", type: .builtIn, filterName: nil, lutData: nil, dimension: 0, isFilm: false),
+            
+            // --- 彩色系列 ---
+            // 鲜艳/正片
+            FilmSimulation(name: "CHROME", type: .builtIn, filterName: "CIPhotoEffectChrome", lutData: nil, dimension: 0, isFilm: false),
+            // 拍立得/即时
+            FilmSimulation(name: "INSTANT", type: .builtIn, filterName: "CIPhotoEffectInstant", lutData: nil, dimension: 0, isFilm: false),
+            // 褪色/复古
+            FilmSimulation(name: "FADE", type: .builtIn, filterName: "CIPhotoEffectFade", lutData: nil, dimension: 0, isFilm: false),
+            // 冲印/冷调
+            FilmSimulation(name: "PROCESS", type: .builtIn, filterName: "CIPhotoEffectProcess", lutData: nil, dimension: 0, isFilm: false),
+            // 传送/怀旧
+            FilmSimulation(name: "TRANSFER", type: .builtIn, filterName: "CIPhotoEffectTransfer", lutData: nil, dimension: 0, isFilm: false),
+            
+            // --- 黑白系列 ---
+            // 纯净黑白
+            FilmSimulation(name: "MONO", type: .builtIn, filterName: "CIPhotoEffectMono", lutData: nil, dimension: 0, isFilm: false),
+            // 电影黑白
+            FilmSimulation(name: "NOIR", type: .builtIn, filterName: "CIPhotoEffectNoir", lutData: nil, dimension: 0, isFilm: false),
+            // 银盐黑白
+            FilmSimulation(name: "TONAL", type: .builtIn, filterName: "CIPhotoEffectTonal", lutData: nil, dimension: 0, isFilm: false)
         ]
     }
 
@@ -47,7 +98,7 @@ class FilmEngine: ObservableObject {
             if let result = parseCubeFile(at: url) {
                 let name = url.deletingPathExtension().lastPathComponent.uppercased()
                 if !availableSimulations.contains(where: { $0.name == name }) {
-                    let sim = FilmSimulation(name: name, type: .lut, filterName: nil, lutData: result.data, dimension: result.dimension)
+                    let sim = FilmSimulation(name: name, type: .lut, filterName: nil, lutData: result.data, dimension: result.dimension, isFilm: true)
                     self.availableSimulations.append(sim)
                 }
             }
@@ -56,20 +107,26 @@ class FilmEngine: ObservableObject {
 
     // 💡 核心渲染函数：在 Camera.swift 中调用
     func process(_ input: CIImage, styleName: String) -> CIImage {
+        
+        var output = input
+        
         guard let sim = availableSimulations.first(where: { $0.name == styleName }), styleName != "STD" else {
             return input
         }
         
         if sim.type == .builtIn, let filter = sim.filterName {
-            return input.applyingFilter(filter)
+            output = input.applyingFilter(filter)
         } else if sim.type == .lut, let data = sim.lutData {
             let filter = CIFilter(name: "CIColorCube")!
             filter.setValue(sim.dimension, forKey: "inputCubeDimension")
             filter.setValue(data, forKey: "inputCubeData")
             filter.setValue(input, forKey: kCIInputImageKey)
-            return filter.outputImage ?? input
+            output = filter.outputImage ?? input
+            if output != input {
+                output = applyFilmGrain(to: output)
+            }
         }
-        return input
+        return output
     }
 
     // 💡 解析 .cube 文件逻辑
@@ -121,7 +178,7 @@ class FilmEngine: ObservableObject {
             try data.write(to: fileURL)
             
             // 存入内存
-            let newSim = FilmSimulation(name: name, type: .lut, filterName: nil, lutData: data, dimension: dimension)
+            let newSim = FilmSimulation(name: name, type: .lut, filterName: nil, lutData: data, dimension: dimension, isFilm: false)
             DispatchQueue.main.async {
                 if !self.availableSimulations.contains(where: { $0.name == name }) {
                     self.availableSimulations.append(newSim)
@@ -152,7 +209,7 @@ class FilmEngine: ObservableObject {
             
             let fileURL = docDir.appendingPathComponent(fileName)
             if let data = try? Data(contentsOf: fileURL) {
-                let sim = FilmSimulation(name: name, type: .lut, filterName: nil, lutData: data, dimension: dimension)
+                let sim = FilmSimulation(name: name, type: .lut, filterName: nil, lutData: data, dimension: dimension, isFilm: false)
                 self.availableSimulations.append(sim)
             }
         }
