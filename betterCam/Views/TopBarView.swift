@@ -11,16 +11,6 @@ struct TopBarView: View {
     @EnvironmentObject var camera: Camera
     var body: some View {
         HStack {
-            /*
-            Text("\(camera.imageQuality)")
-            Spacer()
-            Text("\(camera.aspectRatio)")
-            Spacer()
-            Text("\(camera.AFMode)")
-            Spacer()
-            Text("\(camera.WBMode)")
-             */
-            
             ParameterItem(title: camera.imageQuality, index: 0)
             Spacer()
             ParameterItem(

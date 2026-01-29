@@ -9,7 +9,7 @@ struct KnurledDialView: View {
     @State private var hapticAccumulator: Double = 0
     
     private let dialSize: CGFloat = 140
-    private let stepDegrees: Double = 30
+    private let stepDegrees: Double = 45
     private let midButtonSize: CGFloat = 55
     
     var body: some View {
@@ -162,4 +162,9 @@ struct KnurledDialView: View {
             let generator = UIImpactFeedbackGenerator(style: .light)
             generator.impactOccurred()
         }
+}
+
+#Preview {
+    KnurledDialView()
+        .environmentObject(Camera())
 }

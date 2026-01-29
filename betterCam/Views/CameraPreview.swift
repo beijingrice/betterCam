@@ -8,21 +8,6 @@
 import Foundation
 import SwiftUI
 import UIKit
-
-/*
-struct CameraPreview: View {
-    var imageName: String = "placeholder"
-    let aspectRatio: CGSize = CGSize(width: 4.0, height: 3.0)
-    var body: some View {
-        Image(imageName)
-            .resizable()
-            .clipped()
-            // Apply an appropriate aspect ratio based on the selected capture mode.
-            .aspectRatio(aspectRatio, contentMode: .fill)
-    }
-}
-*/
-
 struct CameraPreview: View {
     @EnvironmentObject var camera: Camera
     let aspectRatio: CGSize = CGSize(width: 4.0, height: 3.0)

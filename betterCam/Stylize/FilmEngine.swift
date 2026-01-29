@@ -36,19 +36,19 @@ class FilmEngine: ObservableObject {
     }
     
     private func prepareStaticGrain() {
-            let noiseGenerator = CIFilter(name: "CIRandomGenerator")!
-            guard let noise = noiseGenerator.outputImage?.cropped(to: CGRect(x: 0, y: 0, width: 2000, height: 2000)) else { return }
-            
-            // 预设好黑白感、对比度以及基础亮度（EV -3.5 让它若隐若现）
-            let processedNoise = noise
-                .applyingFilter("CIColorControls", parameters: [
-                    kCIInputSaturationKey: 0,
-                    kCIInputContrastKey: 1.1
-                ])
-                .applyingFilter("CIExposureAdjust", parameters: [kCIInputEVKey: -3.5])
-            
-            self.staticGrainOverlay = processedNoise
-        }
+        let noiseGenerator = CIFilter(name: "CIRandomGenerator")!
+        guard let noise = noiseGenerator.outputImage?.cropped(to: CGRect(x: 0, y: 0, width: 2000, height: 2000)) else { return }
+        
+        // 预设好黑白感、对比度以及基础亮度（EV -3.5 让它若隐若现）
+        let processedNoise = noise
+            .applyingFilter("CIColorControls", parameters: [
+                kCIInputSaturationKey: 0,
+                kCIInputContrastKey: 1.1
+            ])
+            .applyingFilter("CIExposureAdjust", parameters: [kCIInputEVKey: -3.5])
+        
+        self.staticGrainOverlay = processedNoise
+    }
     
     private func applyFilmGrain(to input: CIImage) -> CIImage {
             guard let grainLayer = staticGrainOverlay else { return input }

@@ -12,13 +12,6 @@ struct BottomBarView: View {
     var body: some View {
         HStack(spacing: 0) {
             Group {
-                /*
-                Text("\(camera.SS)")
-                Text("\(camera.Aperture)")
-                Text("\(camera.EV)")
-                Text("\(camera.ISO)")
-                Text("\(camera.style)")
-                 */
                 ParameterItem(title: camera.SS, index: 4)
                 Spacer()
                 ParameterItem(title: camera.Aperture, index: 5)
