@@ -28,7 +28,7 @@ struct LUTManagerView: View {
                             Spacer()
                         }
                         .swipeActions(edge: .trailing) {
-                            if lut.type != .builtIn {
+                            if lut.type != .builtIn && lut.type != .builtInLut {
                                 Button(role: .destructive) {
                                     // 执行删除逻辑
                                     deleteLUT(lut)
@@ -55,6 +55,7 @@ struct LUTManagerView: View {
                         Label("Import New LUT (.cube)", systemImage: "plus")
                     }
                 }
+                
             }
             .navigationTitle("LUTs management")
             .navigationBarTitleDisplayMode(.inline)

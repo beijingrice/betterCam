@@ -17,6 +17,22 @@
         }
       }
     },
+    "Capture:" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "撮影："
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "拍摄："
+          }
+        }
+      }
+    },
     "Change it to MANAGE then click the" : {
       "localizations" : {
         "ja" : {
@@ -141,6 +157,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在相机屏幕中："
+          }
+        }
+      }
+    },
+    "In LUT management view," : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "LUT管理画面では、リストを"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在LUT管理界面中，"
           }
         }
       }
@@ -273,6 +305,22 @@
         }
       }
     },
+    "Physical Control:" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "カメラ操作："
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "相机控制："
+          }
+        }
+      }
+    },
     "Please enter a new name for this LUT." : {
       "localizations" : {
         "ja" : {
@@ -285,6 +333,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "请为此LUT键入新名称"
+          }
+        }
+      }
+    },
+    "Press center to select" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "中央ボタンで決定"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按中键以选中"
+          }
+        }
+      }
+    },
+    "Press the shutter button to shoot." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "シャッターボタンを押して撮影します。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按快门按钮以拍摄。"
           }
         }
       }
@@ -337,6 +417,38 @@
         }
       }
     },
+    "Rotate the dial to switch items" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ダイヤルを回して項目を切り替え"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "旋转拨轮来切换项目"
+          }
+        }
+      }
+    },
+    "Start Shooting" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "撮影開始"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开始拍摄"
+          }
+        }
+      }
+    },
     "Swipe horizontally for Profile Intensity" : {
       "localizations" : {
         "ja" : {
@@ -349,6 +461,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "水平滑动以调整色彩预设强度"
+          }
+        }
+      }
+    },
+    "Swipe left to rename or delete." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "左スワイプで名前変更や削除が可能です。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "左滑以重命名或删除。"
           }
         }
       }

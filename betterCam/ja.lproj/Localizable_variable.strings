@@ -8,4 +8,4 @@
 "LUT_HUD_FORMAT" = "強さ: %.0f%%  グレイン: %.0f%%";
 "OPEN_SETTINGS" = "設定を開く";
 "CAMERA_ACCESS" = "カメラへのアクセス";
-"PHOTO_LIBRARY_ACCESS" = "写真への書き込み";
+"PHOTO_LIB_ACCESS" = "写真への書き込み";

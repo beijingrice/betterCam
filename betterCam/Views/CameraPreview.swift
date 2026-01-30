@@ -6,21 +6,8 @@
 //
 
 import SwiftUI
-/*
-struct CameraPreview: View {
-    @EnvironmentObject var camera: Camera
-    let aspectRatio: CGSize = CGSize(width: 4.0, height: 3.0)
-    var body: some View {
-        if let image = camera.currentPreviewImage {
-            Image(image, scale: 1.0, orientation: .up, label: Text("Preview"))
-                .resizable()
-                .aspectRatio(aspectRatio, contentMode: .fit) // 强制 4:3 比例
-        } else {
-            Color.black // 启动时的黑屏占位
-        }
-    }
-}
-*/
+import AVFoundation
+import AVKit
 
 struct CameraPreview: View {
     @EnvironmentObject var camera: Camera
@@ -34,63 +21,13 @@ struct CameraPreview: View {
     @State private var showHUD: Bool = false
     @State private var hudText: String = ""
     @State private var hudTimer: Timer?
-
-    /*var body: some View {
-        GeometryReader { geometry in
-            ZStack {
-                // 1. 底层预览图
-                if let image = camera.currentPreviewImage {
-                    Image(image, scale: 1.0, orientation: .up, label: Text("Preview"))
-                        .resizable()
-                        .aspectRatio(aspectRatio, contentMode: .fit)
-                } else {
-                    Color.black
-                }
-                
-                // 2. 💡 透明的手势层 (覆盖在最上方)
-                Color.clear
-                    .contentShape(Rectangle())
-                    .gesture(
-                        DragGesture(minimumDistance: 5) // 设置为 0 可以更灵敏地捕捉初始点
-                            .onChanged { value in
-                                handleDrag(value, in: geometry.size)
-                            }
-                            .onEnded { _ in
-                                // 💡 关键修复：松手时必须清空记录点
-                                // 这样下次手指按下去时，handleDrag 里的 guard 才会触发，重新记录起点
-                                lastDragLocation = nil
-                                startHUDTimer()
-                            }
-                    )
-                    .onTapGesture { location in
-                        handleTapToFocus(at: location, in: geometry.size)
-                    }
-                
-                // 3. 💡 数值反馈提示 (HUD)
-                if showHUD {
-                    Text(hudText)
-                        .font(.system(.caption, design: .monospaced))
-                        .padding(8)
-                        .background(Color.black.opacity(0.6))
-                        .foregroundColor(.white)
-                        .cornerRadius(8)
-                        .transition(.opacity)
-                }
-                
-                if let fp = focusPoint {
-                    FocusBoxView()
-                        .position(fp)
-                        .transition(.scale.combined(with: .opacity))
-                }
-            }
-        }
-    }
-     */
     
     var body: some View {
         GeometryReader { geometry in
             ZStack {
                 if camera.isFullyAuthorized {
+                    CaptureInteractionView(camera: camera)
+                        .ignoresSafeArea()
                     actualPreviewLayer(in: geometry.size)
                 } else if camera.cameraPermission == .denied || camera.photoPermission == .denied {
                     // 💡 只要有一个拒绝，就显示图文提示
@@ -244,4 +181,31 @@ struct CameraPreview: View {
             withAnimation { focusPoint = nil }
         }
     }
+}
+
+struct CaptureInteractionView: UIViewRepresentable {
+    @ObservedObject var camera: Camera
+
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView(frame: .zero)
+        view.backgroundColor = .clear
+        
+        // 仅在 iOS 17.2+ 支持捕获事件，iOS 18 会自动重定向音量键
+        if #available(iOS 17.2, *) {
+            let interaction = AVCaptureEventInteraction { event in
+                // 确保在拍照开始瞬间触发，且不在教学状态下
+                if event.phase == .began && !camera.isShowingTutorial {
+                    camera.takePhoto()
+                    
+                    // 提供物理反馈感
+                    let impact = UIImpactFeedbackGenerator(style: .heavy)
+                    impact.impactOccurred()
+                }
+            }
+            view.addInteraction(interaction)
+        }
+        return view
+    }
+
+    func updateUIView(_ uiView: UIView, context: Context) {}
 }

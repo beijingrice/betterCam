@@ -24,7 +24,7 @@ struct ScreenView: View {
                     BottomBarView()
                 } else {
                     Spacer()
-                    Color.black
+                    Color.clear
                         .frame(height: 40)
                 }
             }
