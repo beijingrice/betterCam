@@ -6,3 +6,6 @@
   
 */
 "LUT_HUD_FORMAT" = "强度: %.0f%%  噪点: %.0f%%";
+"OPEN_SETTINGS" = "打开设置";
+"CAMERA_ACCESS" = "访问相机";
+"PHOTO_LIB_ACCESS" = "写入相册";

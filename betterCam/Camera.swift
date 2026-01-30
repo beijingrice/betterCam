@@ -13,11 +13,24 @@ import CoreImage
 import Photos
 import CoreMotion
 
+enum CameraPermissionStatus {
+    case undetermined  // 尚未询问
+    case authorized    // 已授权
+    case denied        // 已拒绝
+}
+
 class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVCapturePhotoCaptureDelegate {
     private var exposureOffsetObserver: NSKeyValueObservation?
     private var smoothedOffset: Float = 0.0 // 💡 用于平滑存储
     private var lastUpdateTimestamp: TimeInterval = 0
     private let sessionQueue = DispatchQueue(label: "com.betterCam.sessionQueue")
+    
+    @Published var cameraPermission: CameraPermissionStatus = .undetermined
+    @Published var photoPermission: CameraPermissionStatus = .undetermined
+    
+    var isFullyAuthorized: Bool {
+        cameraPermission == .authorized && photoPermission == .authorized
+    }
     
     // Camera.swift 中添加
     @AppStorage("hasCompletedTutorial") var hasCompletedTutorial: Bool = false
@@ -137,10 +150,17 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     // var styleOptions: [String] = ["STD", "RICH", "NOSTALGIC", "BW", "MANAGE"]
     // TODO: Change it back after ADD function is ready
     var styleOptions: [String] = []
+    var AFModeOptions: [String] = ["AF-C", "AF-S"]
     @Published var style: String = "STD"
     @Published var imageQuality: String = "DNG+J"
     @Published var aspectRatio: String = "4:3"
-    @Published var AFMode: String = "AF-C"
+    @Published var AFMode: String = "AF-C" {
+        didSet {
+            if AFMode == "AF-S" {
+                lockFocus()
+            }
+        }
+    }
     @Published var WBMode: String = "AWB"
     let ISOoptions = ["AUTO", "50", "64", "100", "125", "160", "200", "250", "320", "400", "500", "640", "800", "1000", "1250", "1600", "2000", "2500", "3200", "4000", "5000", "6400"]
     let SSoptions = [
@@ -215,6 +235,7 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     
     override init() {
         super.init()
+        checkAllPermissions()
         discoverCameras()
         setupShutterSound()
         setupSession()
@@ -225,6 +246,38 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
             isShowingTutorial = true
         }
     }
+    
+    func checkAllPermissions() {
+        // 1. 检查相机权限
+        let cameraStatus = AVCaptureDevice.authorizationStatus(for: .video)
+        handleCameraStatus(cameraStatus)
+        
+        // 2. 检查相册写入权限
+        let photoStatus = PHPhotoLibrary.authorizationStatus(for: .addOnly)
+        handlePhotoStatus(photoStatus)
+    }
+    private func handleCameraStatus(_ status: AVAuthorizationStatus) {
+        switch status {
+        case .authorized: cameraPermission = .authorized
+        case .notDetermined:
+            AVCaptureDevice.requestAccess(for: .video) { granted in
+                DispatchQueue.main.async { self.cameraPermission = granted ? .authorized : .denied }
+            }
+        default: cameraPermission = .denied
+        }
+    }
+
+    private func handlePhotoStatus(_ status: PHAuthorizationStatus) {
+        switch status {
+        case .authorized, .limited: photoPermission = .authorized
+        case .notDetermined:
+            PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+                DispatchQueue.main.async { self.photoPermission = (status == .authorized || status == .limited) ? .authorized : .denied }
+            }
+        default: photoPermission = .denied
+        }
+    }
+    
     
     func discoverCameras() {
         let discoverySession = AVCaptureDevice.DiscoverySession(deviceTypes: [.builtInWideAngleCamera, .builtInUltraWideCamera, .builtInTelephotoCamera], mediaType: .video, position: .back)
@@ -351,6 +404,61 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
         }
     }
     
+    func focus(at point: CGPoint) {
+        sessionQueue.async { [weak self] in
+            guard let self = self else { return }
+            guard AFMode != "MF" else { return }
+            
+            // 1. 获取当前正在使用的物理设备
+            guard let device = self.availableDevices.indices.contains(self.currentDeviceIndex) ?
+                    self.availableDevices[self.currentDeviceIndex] :
+                        AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else { return }
+            
+            do {
+                try device.lockForConfiguration()
+                
+                // 2. 设置对焦模式（如果设备支持）
+                // point 是已经转换后的 (0,0) 到 (1,1) 的坐标
+                if device.isFocusPointOfInterestSupported && device.isFocusModeSupported(.autoFocus) {
+                    device.focusPointOfInterest = point
+                    device.focusMode = .autoFocus // 这里使用 .autoFocus 触发一次对焦
+                }
+                
+                // 3. 设置曝光测光模式（通常对焦和测光点是一致的）
+                if device.isExposurePointOfInterestSupported && device.isExposureModeSupported(.continuousAutoExposure) {
+                    device.exposurePointOfInterest = point
+                }
+                
+                // 4. 对焦完成后建议恢复到连续自动对焦 (AF-C)
+                // 你也可以根据你的 AFMode 逻辑来决定是否切回 .continuousAutoFocus
+                if AFMode == "AF-C" {
+                    device.focusMode = .continuousAutoFocus
+                }
+                
+                
+                device.unlockForConfiguration()
+            } catch {
+                print("❌ 对焦配置失败: \(error)")
+            }
+        }
+    }
+    
+    func lockFocus() {
+        sessionQueue.async { [weak self] in
+            guard let self = self else { return }
+            guard let device = self.availableDevices.indices.contains(self.currentDeviceIndex) ?
+                    self.availableDevices[self.currentDeviceIndex] :
+                        AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else { return }
+            do {
+                try device.lockForConfiguration()
+                device.focusMode = .locked
+                device.unlockForConfiguration()
+            } catch {
+                // Do nothing
+            }
+        }
+    }
+    
     private func setupShutterSound() {
         guard let soundURL = Bundle.main.url(forResource: "shutter_eqed_gained", withExtension: "aac") else { return }
         AudioServicesCreateSystemSoundID(soundURL as CFURL, &shutterSoundID)
@@ -364,6 +472,8 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     
     private func adjustValue(direction: Int) {
         switch activeIndex {
+        case 2:
+            AFMode = nextOption(in: AFModeOptions, current: AFMode, direction: direction)
         case 8: // STYLE
             style = nextOption(in: styleOptions, current: style, direction: direction)
         case 4: // SS

@@ -18,9 +18,15 @@ struct ScreenView: View {
             CameraPreview()
                 .background(Color.black)
             VStack(spacing: 0) {
-                TopBarView()
-                Spacer()
-                BottomBarView()
+                if camera.isFullyAuthorized {
+                    TopBarView()
+                    Spacer()
+                    BottomBarView()
+                } else {
+                    Spacer()
+                    Color.black
+                        .frame(height: 40)
+                }
             }
         }
         .aspectRatio(4/3, contentMode: .fit)

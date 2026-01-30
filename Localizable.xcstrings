@@ -17,6 +17,22 @@
         }
       }
     },
+    "Change it to MANAGE then click the" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「MANAGE」に切り替えたあと、"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "将其更改为MANAGE并点击"
+          }
+        }
+      }
+    },
     "Delete" : {
       "localizations" : {
         "ja" : {
@@ -66,7 +82,20 @@
       }
     },
     "Got it" : {
-
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "了解しました"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "明白了"
+          }
+        }
+      }
     },
     "Import New LUT (.cube)" : {
       "localizations" : {
@@ -84,8 +113,37 @@
         }
       }
     },
+    "In bottom bar of camera screen:" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "画面右下の設定項目から"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在相机屏幕的底部边栏中："
+          }
+        }
+      }
+    },
     "In camera screen:" : {
-
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "カメラ画面にて:"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在相机屏幕中："
+          }
+        }
+      }
     },
     "Launch BetterCam" : {
       "localizations" : {
@@ -119,6 +177,22 @@
         }
       }
     },
+    "Look for STYLE parameter," : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "「STYLE」を選択してください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "找到STYLE参数，"
+          }
+        }
+      }
+    },
     "LUTs management" : {
       "localizations" : {
         "ja" : {
@@ -131,6 +205,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "LUT管理"
+          }
+        }
+      }
+    },
+    "middle button of the dial to manage LUTs." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ダイヤル中央のボタンで管理します。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "滚轮中央的中键以管理LUT。"
           }
         }
       }
@@ -163,6 +253,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "OK"
+          }
+        }
+      }
+    },
+    "Permission Needed" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "アクセス権限が必要です"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "需要权限"
           }
         }
       }
@@ -231,11 +337,53 @@
         }
       }
     },
-    "Swipe horizontally for LUT Intensity" : {
-
+    "Swipe horizontally for Profile Intensity" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "左右スワイプで強さを調整"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "水平滑动以调整色彩预设强度"
+          }
+        }
+      }
     },
     "Swipe vertically for Grain" : {
-
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上下スワイプでグレインを調整"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上下滑动以更改噪点强度"
+          }
+        }
+      }
+    },
+    "Usually it's STD when launched." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "起動時は通常「STD」に設定されています。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通常启动时它是STD。"
+          }
+        }
+      }
     }
   },
   "version" : "1.1"

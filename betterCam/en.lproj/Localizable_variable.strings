@@ -6,3 +6,6 @@
   
 */
 "LUT_HUD_FORMAT" = "STRENGTH: %.0f%%  GRAIN: %.0f%%";
+"OPEN_SETTINGS" = "Open Settings";
+"CAMERA_ACCESS" = "Camera Access";
+"PHOTO_LIB_ACCESS" = "Photo Library Write Access";
