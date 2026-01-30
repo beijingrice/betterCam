@@ -157,7 +157,9 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     @Published var AFMode: String = "AF-C" {
         didSet {
             if AFMode == "AF-S" {
-                lockFocus()
+                focusModify(mode: .locked)
+            } else if AFMode == "AF-C" {
+                focusModify(mode: .continuousAutoFocus)
             }
         }
     }
@@ -443,7 +445,7 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
         }
     }
     
-    func lockFocus() {
+    func focusModify(mode: AVCaptureDevice.FocusMode) {
         sessionQueue.async { [weak self] in
             guard let self = self else { return }
             guard let device = self.availableDevices.indices.contains(self.currentDeviceIndex) ?
@@ -451,7 +453,7 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
                         AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else { return }
             do {
                 try device.lockForConfiguration()
-                device.focusMode = .locked
+                device.focusMode = mode
                 device.unlockForConfiguration()
             } catch {
                 // Do nothing
