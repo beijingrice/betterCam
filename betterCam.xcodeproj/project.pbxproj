@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		1A442D4F2F2BAEFE00EADEE3 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 1A442D4E2F2BAEFE00EADEE3 /* Localizable.xcstrings */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		1AB07E512F21F48300CBA2B6 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -24,6 +28,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		1A442D4E2F2BAEFE00EADEE3 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
 		1AB07E432F21F48200CBA2B6 /* betterCam.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = betterCam.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		1AB07E502F21F48300CBA2B6 /* betterCamTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = betterCamTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1AB07E5A2F21F48300CBA2B6 /* betterCamUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = betterCamUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -88,6 +93,7 @@
 		1AB07E3A2F21F48200CBA2B6 = {
 			isa = PBXGroup;
 			children = (
+				1A442D4E2F2BAEFE00EADEE3 /* Localizable.xcstrings */,
 				1AB07E452F21F48200CBA2B6 /* betterCam */,
 				1AB07E532F21F48300CBA2B6 /* betterCamTests */,
 				1AB07E5D2F21F48300CBA2B6 /* betterCamUITests */,
@@ -205,6 +211,8 @@
 			knownRegions = (
 				en,
 				Base,
+				"zh-Hans",
+				ja,
 			);
 			mainGroup = 1AB07E3A2F21F48200CBA2B6;
 			minimizedProjectReferenceProxies = 1;
@@ -225,6 +233,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1A442D4F2F2BAEFE00EADEE3 /* Localizable.xcstrings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -341,6 +350,7 @@
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_EMIT_LOC_STRINGS = YES;
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
 			name = Debug;
@@ -397,6 +407,7 @@
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;
 				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_EMIT_LOC_STRINGS = YES;
 				VALIDATE_PRODUCT = YES;
 			};
 			name = Release;

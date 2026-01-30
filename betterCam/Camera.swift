@@ -17,43 +17,72 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     private var exposureOffsetObserver: NSKeyValueObservation?
     private var smoothedOffset: Float = 0.0 // 💡 用于平滑存储
     private var lastUpdateTimestamp: TimeInterval = 0
+    private let sessionQueue = DispatchQueue(label: "com.betterCam.sessionQueue")
+    
+    @Published var inCameraView: Bool = true {
+        didSet {
+            sessionQueue.async { [weak self] in
+                guard let self = self else { return }
+                if !inCameraView {
+                    if self.session.isRunning {
+                        self.session.stopRunning()
+                    }
+                } else {
+                    if !self.session.isRunning {
+                        self.session.startRunning()
+                    }
+                }
+            }
+        }
+    }
     
     @Published var isCapturing: Bool = false
     @Published var availableDevices: [AVCaptureDevice] = []
-    @Published var currentDeviceIndex: Int = 0
-    @Published var showFilePicker: Bool = false
+    @Published var currentDeviceIndex: Int = 0 {
+        didSet {
+            setupLightMeter()
+        }
+    }
+    
+    deinit {
+        exposureOffsetObserver?.invalidate()
+    }
     
     func setupLightMeter() {
-            guard let device = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else { return }
+        exposureOffsetObserver?.invalidate()
+        guard availableDevices.indices.contains(currentDeviceIndex) else { return }
+        let device = availableDevices[currentDeviceIndex]
+        exposureOffsetObserver = device.observe(\.exposureTargetOffset, options: [.new]) {[weak self] device, _ in
+            // 只有当快门和 ISO 都是手动时，才激活“测光表”模式
+            guard let self = self else { return }
+            if self.SS != "AUTO" && self.ISO != "AUTO" {
+                let rawOffset = device.exposureTargetOffset
                 
-            exposureOffsetObserver = device.observe(\.exposureTargetOffset, options: [.new]) { device, _ in
-                // 只有当快门和 ISO 都是手动时，才激活“测光表”模式
-                if self.SS != "AUTO" && self.ISO != "AUTO" {
-                    let rawOffset = device.exposureTargetOffset
+                // 1. 💡 低通滤波算法：新值 = 旧值 * 0.8 + 采样值 * 0.2
+                // 这能让数字变化带有“阻尼感”，过滤掉高频抖动
+                self.smoothedOffset = (self.smoothedOffset * 0.8) + (rawOffset * 0.2)
+                
+                let now = Date().timeIntervalSince1970
+                // 2. 限制 UI 刷新频率（每 150ms），进一步减少视觉疲劳
+                if now - self.lastUpdateTimestamp > 0.15 {
+                    // 3. 💡 增加“死区”判断：如果绝对值很小，直接显示 0.0，防止在 0 附近乱跳
+                    var displayValue = self.smoothedOffset
+                    if abs(displayValue) < 0.15 { displayValue = 0.0 }
                     
-                    // 1. 💡 低通滤波算法：新值 = 旧值 * 0.8 + 采样值 * 0.2
-                    // 这能让数字变化带有“阻尼感”，过滤掉高频抖动
-                    self.smoothedOffset = (self.smoothedOffset * 0.8) + (rawOffset * 0.2)
+                    let formattedOffset = String(format: "%+.1f", displayValue)
                     
-                    let now = Date().timeIntervalSince1970
-                    // 2. 限制 UI 刷新频率（每 150ms），进一步减少视觉疲劳
-                    if now - self.lastUpdateTimestamp > 0.15 {
-                        // 3. 💡 增加“死区”判断：如果绝对值很小，直接显示 0.0，防止在 0 附近乱跳
-                        var displayValue = self.smoothedOffset
-                        if abs(displayValue) < 0.15 { displayValue = 0.0 }
-                        
-                        let formattedOffset = String(format: "%+.1f", displayValue)
-                        
-                        DispatchQueue.main.async {
-                            if self.EV != formattedOffset {
-                                self.EV = formattedOffset
-                                self.lastUpdateTimestamp = now
-                            }
+                    DispatchQueue.main.async {
+                        if self.EV != formattedOffset {
+                            self.EV = formattedOffset
+                            self.lastUpdateTimestamp = now
                         }
                     }
                 }
             }
         }
+        
+    }
+    
     private var lastSS: String = ""
     private var lastISO: String = ""
     private func autoAmode(nowBeingControlled: String) {
@@ -93,7 +122,7 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
             updateExposure()
         }
     }
-    // var styleOptions: [String] = ["STD", "RICH", "NOSTALGIC", "BW", "ADD"]
+    // var styleOptions: [String] = ["STD", "RICH", "NOSTALGIC", "BW", "MANAGE"]
     // TODO: Change it back after ADD function is ready
     var styleOptions: [String] = []
     @Published var style: String = "STD"
@@ -160,12 +189,15 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     func syncAllLUTsToOptions() {
         // 获取 FilmEngine 里所有的胶片名（包括内置和用户导入的）
         let allNames = FilmEngine.shared.availableSimulations.map { $0.name }
-        
+        styleOptions = []
         for name in allNames {
             if !styleOptions.contains(name) {
                 // TODO: Change it back to ADD
                 styleOptions.append(name)
             }
+        }
+        if !styleOptions.contains("MANAGE") {
+            styleOptions.append("MANAGE")
         }
     }
     
@@ -223,8 +255,8 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
                 isAdjustingValue = true
             }
             else { // is adjusting value
-                if style == "ADD" {
-                    showFilePicker = true
+                if style == "MANAGE" {
+                    inCameraView = false
                     isAdjustingValue = false
                 } else {
                     isAdjustingValue = false
@@ -251,10 +283,14 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     }
     
     private func setupSession() {
+        guard !availableDevices.isEmpty else { return }
         session.beginConfiguration()
         session.sessionPreset = .photo
+        defer {
+            self.session.commitConfiguration()
+        }
         
-        guard let videoDevice = AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
+        guard let videoDevice = availableDevices[currentDeviceIndex] ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
               let videoDeviceInput = try? AVCaptureDeviceInput(device: videoDevice),
               session.canAddInput(videoDeviceInput) else { return }
         session.addInput(videoDeviceInput)
@@ -480,11 +516,6 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
                 
                 device.setExposureModeCustom(duration: duration, iso: isoValue, completionHandler: nil)
                 
-            } else if !isSSAuto && isISOAuto {
-                device.exposureMode = .continuousAutoExposure
-                
-            } else if isSSAuto && !isISOAuto {
-                device.exposureMode = .continuousAutoExposure
             }
             
             device.unlockForConfiguration()

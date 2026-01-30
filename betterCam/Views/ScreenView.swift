@@ -24,20 +24,6 @@ struct ScreenView: View {
             }
         }
         .aspectRatio(4/3, contentMode: .fit)
-        .fileImporter(isPresented: $camera.showFilePicker, allowedContentTypes: [.item], allowsMultipleSelection: false) {
-            result in handleImport(result: result)
-        }
-        .alert("导入胶片模拟", isPresented: $showRenameAlert) {
-                    TextField("输入滤镜名称", text: $newLUTName)
-                    Button("取消", role: .cancel) { tempLUTData = nil }
-            Button("保存") {
-                if let data = tempLUTData {
-                    saveNewLUT(data: data, name: newLUTName, dimension: tempDimension)
-                }
-            }
-        } message: {
-            Text("请为你的自定义 LUT 起一个名字")
-        }
     }
     
     private func handleImport(result: Result<[URL], Error>) {

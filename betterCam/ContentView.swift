@@ -30,6 +30,12 @@ struct ContentView: View {
             .statusBar(hidden: true)
             .environmentObject(camera)
         }
+        .fullScreenCover(isPresented: Binding(
+            get: { !camera.inCameraView }, // 如果不在相机视图，就显示管理页面
+            set: { if $0 == false { camera.inCameraView = true } }
+        )) {
+            LUTManagerView(camera: camera)
+        }
     }
 }
 

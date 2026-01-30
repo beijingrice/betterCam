@@ -8,7 +8,7 @@ enum FilmStyleType {
 }
 
 struct FilmSimulation {
-    let name: String
+    var name: String
     let type: FilmStyleType
     let filterName: String?
     let lutData: Data?
@@ -98,7 +98,7 @@ class FilmEngine: ObservableObject {
             if let result = parseCubeFile(at: url) {
                 let name = url.deletingPathExtension().lastPathComponent.uppercased()
                 if !availableSimulations.contains(where: { $0.name == name }) {
-                    let sim = FilmSimulation(name: name, type: .lut, filterName: nil, lutData: result.data, dimension: result.dimension, isFilm: true)
+                    let sim = FilmSimulation(name: name, type: .builtIn, filterName: nil, lutData: result.data, dimension: result.dimension, isFilm: true)
                     self.availableSimulations.append(sim)
                 }
             }
@@ -191,6 +191,8 @@ class FilmEngine: ObservableObject {
             savedList.append(metadata)
             UserDefaults.standard.set(savedList, forKey: "UserSavedLUTs")
             
+            availableSimulations.append(newSim)
+            
         } catch {
             print("❌ 存储失败: \(error)")
         }
@@ -212,6 +214,38 @@ class FilmEngine: ObservableObject {
                 let sim = FilmSimulation(name: name, type: .lut, filterName: nil, lutData: data, dimension: dimension, isFilm: false)
                 self.availableSimulations.append(sim)
             }
+        }
+    }
+    
+    // 在 FilmEngine 类中添加
+    func deleteSimulation(named name: String) {
+        // 1. 从内存中移除对象
+        availableSimulations.removeAll { $0.name == name }
+        
+        // 2. 物理删除 Documents 目录下的文件
+        let fileManager = FileManager.default
+        if let docDir = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first {
+            let fileURL = docDir.appendingPathComponent("\(name).cube")
+            try? fileManager.removeItem(at: fileURL)
+        }
+        
+        // 3. 更新持久化列表
+        var savedList = UserDefaults.standard.array(forKey: "UserSavedLUTs") as? [[String: Any]] ?? []
+        savedList.removeAll { ($0["name"] as? String) == name }
+        UserDefaults.standard.set(savedList, forKey: "UserSavedLUTs")
+    }
+
+    func renameSimulation(oldName: String, newName: String) {
+        // 1. 更新内存数组中的名字
+        if let index = availableSimulations.firstIndex(where: { $0.name == oldName }) {
+            availableSimulations[index].name = newName
+        }
+        
+        // 2. 更新 UserDefaults
+        var savedList = UserDefaults.standard.array(forKey: "UserSavedLUTs") as? [[String: Any]] ?? []
+        if let index = savedList.firstIndex(where: { ($0["name"] as? String) == oldName }) {
+            savedList[index]["name"] = newName
+            UserDefaults.standard.set(savedList, forKey: "UserSavedLUTs")
         }
     }
 }
