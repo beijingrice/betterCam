@@ -26,9 +26,13 @@ struct ContentView: View {
                 ControlDialView()
                     .padding(.leading, UIScreen.main.bounds.width * 0.1)
             }
-            
             .statusBar(hidden: true)
             .environmentObject(camera)
+            if camera.isShowingTutorial {
+                TutorialOverlay(camera: camera)
+                    .transition(.opacity)
+                    .zIndex(99) // 确保在最上层
+            }
         }
         .fullScreenCover(isPresented: Binding(
             get: { !camera.inCameraView }, // 如果不在相机视图，就显示管理页面

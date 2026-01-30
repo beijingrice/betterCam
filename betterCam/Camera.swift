@@ -19,6 +19,18 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     private var lastUpdateTimestamp: TimeInterval = 0
     private let sessionQueue = DispatchQueue(label: "com.betterCam.sessionQueue")
     
+    // Camera.swift 中添加
+    @AppStorage("hasCompletedTutorial") var hasCompletedTutorial: Bool = false
+    @Published var isShowingTutorial: Bool = false
+    
+    // 在 Camera 类中添加
+    @Published var lutIntensity: Float = 1.0  // 0.0 到 1.0
+    @Published var grainIntensity: Float = 0.0 // 0.0 到 1.0
+
+    // 定义一个临时的起始值，用于手势计算
+    private var startLutIntensity: Float = 0.0
+    private var startGrainIntensity: Float = 0.0
+    
     @Published var inCameraView: Bool = true {
         didSet {
             sessionQueue.async { [weak self] in
@@ -209,6 +221,9 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
         setupLightMeter()
         startDeviceMotion()
         syncAllLUTsToOptions()
+        if !hasCompletedTutorial {
+            isShowingTutorial = true
+        }
     }
     
     func discoverCameras() {
@@ -311,6 +326,7 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
         }
         
         session.commitConfiguration()
+        print("AF Mode:", videoDevice.focusMode)
         
         DispatchQueue.global(qos: .userInitiated).async {
             self.session.startRunning()
@@ -319,15 +335,15 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-        
-        // 1. 将原始数据转为 CIImage
         let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
         
-        // 2. 💡 核心逻辑：根据拍摄模式决定预览效果
-        // 如果是纯 DNG 模式，直接使用原图；否则应用滤镜
-        let finalImage = (imageQuality == "DNG") ? ciImage : FilmEngine.shared.process(ciImage, styleName: style)
+        // 💡 传入实时强度参数
+        let finalImage = (imageQuality == "DNG") ? ciImage :
+        FilmEngine.shared.process(ciImage,
+                                  styleName: style,
+                                  lutIntensity: lutIntensity,
+                                  grainIntensity: grainIntensity)
         
-        // 3. 渲染到预览图层
         if let cgImage = context.createCGImage(finalImage, from: finalImage.extent) {
             DispatchQueue.main.async {
                 self.currentPreviewImage = cgImage
@@ -430,7 +446,7 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
                   let ciImage = CIImage(data: imageData) else { return }
             
             // 应用滤镜
-            let filteredImage = FilmEngine.shared.process(ciImage, styleName: style)
+            let filteredImage = FilmEngine.shared.process(ciImage, styleName: style, lutIntensity: lutIntensity, grainIntensity: grainIntensity)
             let context = CIContext()
             guard let colorSpace = ciImage.colorSpace,
                   let processedData = context.jpegRepresentation(of: filteredImage, colorSpace: colorSpace, options: [:]) else { return }

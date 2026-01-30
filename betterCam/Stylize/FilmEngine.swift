@@ -4,7 +4,8 @@ import Combine
 
 enum FilmStyleType {
     case builtIn    // 内部写死的滤镜组合
-    case lut        // 基于 LUT 文件的滤镜
+    case lut // 基于 LUT 文件的滤镜
+    case builtInLut
 }
 
 struct FilmSimulation {
@@ -50,20 +51,26 @@ class FilmEngine: ObservableObject {
         self.staticGrainOverlay = processedNoise
     }
     
-    private func applyFilmGrain(to input: CIImage) -> CIImage {
-            guard let grainLayer = staticGrainOverlay else { return input }
-            
-            // 使用 CIAffineTile 确保纹理填满 input 范围（即使 input 分辨率改变）
-            let tiledGrain = grainLayer
-                .applyingFilter("CIAffineTile")
-                .cropped(to: input.extent)
-
-            // 直接使用 Overlay 混合，性能消耗降到最低
-            return input.applyingFilter("CIOverlayBlendMode", parameters: [
-                kCIInputImageKey: tiledGrain,
-                kCIInputBackgroundImageKey: input
+    private func applyDynamicGrain(to input: CIImage, intensity: Float) -> CIImage {
+        guard let grainLayer = staticGrainOverlay else { return input }
+        
+        // 1. 调整噪点图的透明度来控制强度
+        let grainWithIntensity = grainLayer
+            .applyingFilter("CIColorMatrix", parameters: [
+                "inputAVector": CIVector(x: 0, y: 0, z: 0, w: CGFloat(intensity))
             ])
-        }
+        
+        // 2. 铺满屏幕
+        let tiledGrain = grainWithIntensity
+            .applyingFilter("CIAffineTile")
+            .cropped(to: input.extent)
+
+        // 3. 混合
+        return input.applyingFilter("CIOverlayBlendMode", parameters: [
+            kCIInputImageKey: tiledGrain,
+            kCIInputBackgroundImageKey: input
+        ])
+    }
 
     private func setupInitialStyles() {
         self.availableSimulations = [
@@ -98,7 +105,7 @@ class FilmEngine: ObservableObject {
             if let result = parseCubeFile(at: url) {
                 let name = url.deletingPathExtension().lastPathComponent.uppercased()
                 if !availableSimulations.contains(where: { $0.name == name }) {
-                    let sim = FilmSimulation(name: name, type: .builtIn, filterName: nil, lutData: result.data, dimension: result.dimension, isFilm: true)
+                    let sim = FilmSimulation(name: name, type: .builtInLut, filterName: nil, lutData: result.data, dimension: result.dimension, isFilm: true)
                     self.availableSimulations.append(sim)
                 }
             }
@@ -106,6 +113,7 @@ class FilmEngine: ObservableObject {
     }
 
     // 💡 核心渲染函数：在 Camera.swift 中调用
+    /*
     func process(_ input: CIImage, styleName: String) -> CIImage {
         
         var output = input
@@ -126,6 +134,53 @@ class FilmEngine: ObservableObject {
                 output = applyFilmGrain(to: output)
             }
         }
+        return output
+    }
+     */
+    
+    
+    func process(_ input: CIImage, styleName: String, lutIntensity: Float, grainIntensity: Float) -> CIImage {
+        guard styleName != "STD" || grainIntensity > 0 else {
+            return input
+        }
+        
+        var output = input
+        
+        // 2. 找到对应的滤镜配置
+        if let sim = availableSimulations.first(where: { $0.name == styleName }), styleName != "STD" {
+            var filteredImage: CIImage?
+            
+            if sim.type == .builtIn, let filterName = sim.filterName {
+                filteredImage = input.applyingFilter(filterName)
+            } else if (sim.type == .lut || sim.type == .builtInLut), let data = sim.lutData {
+                let filter = CIFilter(name: "CIColorCube")!
+                filter.setValue(sim.dimension, forKey: "inputCubeDimension")
+                filter.setValue(data, forKey: "inputCubeData")
+                filter.setValue(input, forKey: kCIInputImageKey)
+                filteredImage = filter.outputImage
+            }
+            
+            // 💡 关键：根据 lutIntensity 混合原图和滤镜图
+            if let filtered = filteredImage {
+                // 使用遮罩滤镜实现 alpha 混合
+                let blendFilter = CIFilter(name: "CIBlendWithAlphaMask")!
+                blendFilter.setValue(filtered, forKey: kCIInputImageKey) // 上层：滤镜后的图
+                blendFilter.setValue(input, forKey: kCIInputBackgroundImageKey) // 下层：原图
+                
+                // 创建一个纯色的强度遮罩
+                let alphaColor = CIColor(red: CGFloat(lutIntensity), green: CGFloat(lutIntensity), blue: CGFloat(lutIntensity), alpha: CGFloat(lutIntensity))
+                let maskImage = CIImage(color: alphaColor).cropped(to: input.extent)
+                blendFilter.setValue(maskImage, forKey: kCIInputMaskImageKey)
+                
+                output = blendFilter.outputImage ?? input
+            }
+        }
+        
+        // 3. 💡 关键：根据 grainIntensity 应用噪点
+        if grainIntensity > 0 {
+            output = applyDynamicGrain(to: output, intensity: grainIntensity)
+        }
+        
         return output
     }
 

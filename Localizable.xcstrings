@@ -65,6 +65,9 @@
         }
       }
     },
+    "Got it" : {
+
+    },
     "Import New LUT (.cube)" : {
       "localizations" : {
         "ja" : {
@@ -80,6 +83,9 @@
           }
         }
       }
+    },
+    "In camera screen:" : {
+
     },
     "Launch BetterCam" : {
       "localizations" : {
@@ -224,6 +230,12 @@
           }
         }
       }
+    },
+    "Swipe horizontally for LUT Intensity" : {
+
+    },
+    "Swipe vertically for Grain" : {
+
     }
   },
   "version" : "1.1"

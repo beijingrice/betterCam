@@ -1,0 +1,8 @@
+/* 
+  Localizable.strings
+  betterCam
+
+  Created by Rice on 2026/1/30.
+  
+*/
+"LUT_HUD_FORMAT" = "STRENGTH: %.0f%%  GRAIN: %.0f%%";
