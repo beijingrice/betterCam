@@ -111,32 +111,6 @@ class FilmEngine: ObservableObject {
             }
         }
     }
-
-    // 💡 核心渲染函数：在 Camera.swift 中调用
-    /*
-    func process(_ input: CIImage, styleName: String) -> CIImage {
-        
-        var output = input
-        
-        guard let sim = availableSimulations.first(where: { $0.name == styleName }), styleName != "STD" else {
-            return input
-        }
-        
-        if sim.type == .builtIn, let filter = sim.filterName {
-            output = input.applyingFilter(filter)
-        } else if sim.type == .lut, let data = sim.lutData {
-            let filter = CIFilter(name: "CIColorCube")!
-            filter.setValue(sim.dimension, forKey: "inputCubeDimension")
-            filter.setValue(data, forKey: "inputCubeData")
-            filter.setValue(input, forKey: kCIInputImageKey)
-            output = filter.outputImage ?? input
-            if output != input {
-                output = applyFilmGrain(to: output)
-            }
-        }
-        return output
-    }
-     */
     
     
     func process(_ input: CIImage, styleName: String, lutIntensity: Float, grainIntensity: Float) -> CIImage {
@@ -177,7 +151,7 @@ class FilmEngine: ObservableObject {
         }
         
         // 3. 💡 关键：根据 grainIntensity 应用噪点
-        if grainIntensity > 0 {
+        if grainIntensity > 0 && styleName != "STD" {
             output = applyDynamicGrain(to: output, intensity: grainIntensity)
         }
         
