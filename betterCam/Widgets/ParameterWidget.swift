@@ -12,16 +12,22 @@ struct ParameterItem: View {
     let index: Int
     @EnvironmentObject var camera: Camera
     var body: some View {
-        if camera.activeIndex == index {
-            Text(title)
-                .frame(height: 40)
-                .frame(maxWidth: .infinity)
-                .foregroundColor(.black)
-                .background(camera.isAdjustingValue ? Color.white.opacity(0.7) : Color.white.opacity(0.5))
-        } else {
-            Text(title)
-                .frame(height: 40)
-                .frame(maxWidth: .infinity)
+        VStack {
+            if camera.activeIndex == index {
+                Text(title)
+                    .frame(height: 40)
+                    .frame(maxWidth: .infinity)
+                    .foregroundColor(.black)
+                    .background(camera.isAdjustingValue ? Color.white.opacity(0.7) : Color.white.opacity(0.5))
+            } else {
+                Text(title)
+                    .frame(height: 40)
+                    .frame(maxWidth: .infinity)
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            camera.activeIndex = index
         }
     }
 }
