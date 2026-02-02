@@ -19,7 +19,26 @@ enum CameraPermissionStatus {
     case denied        // 已拒绝
 }
 
+enum UIWidgets: Int, CaseIterable {
+    case imageQuality   = 0
+    case lensSwitch     = 1
+    case AFMode         = 2
+    case WBMode         = 3
+    case MENU           = 4
+    case SS             = 5
+    case aperture       = 6
+    case EV             = 7
+    case ISO            = 8
+    case Style          = 9
+}
+
 class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVCapturePhotoCaptureDelegate {
+    private var maxWidgetIndex: Int {
+        return UIWidgets.allCases.map { $0.rawValue }.max() ?? 0
+    }
+    private var nullWidgetIndex: Int {
+        return maxWidgetIndex + 1
+    }
     private var exposureOffsetObserver: NSKeyValueObservation?
     private var smoothedOffset: Float = 0.0 // 💡 用于平滑存储
     private var lastUpdateTimestamp: TimeInterval = 0
@@ -36,13 +55,34 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     @AppStorage("hasCompletedTutorial") var hasCompletedTutorial: Bool = false
     @Published var isShowingTutorial: Bool = false
     
+    @Published var showingMENU: Bool = false
+    
     // 在 Camera 类中添加
     @Published var lutIntensity: Float = 1.0  // 0.0 到 1.0
-    @Published var grainIntensity: Float = 0.0 // 0.0 到 1.0
+    @Published var grainIntensity: Float = 0.5 // 0.0 到 1.0
 
     // 定义一个临时的起始值，用于手势计算
     private var startLutIntensity: Float = 0.0
     private var startGrainIntensity: Float = 0.0
+    
+    func callAllStartupFuncs() {
+        checkAllPermissions()
+        discoverCameras()
+        setupShutterSound()
+        setupSession()
+        setupLightMeter()
+        startDeviceMotion()
+        syncAllLUTsToOptions()
+    }
+    
+    override init() {
+        super.init()
+        if hasCompletedTutorial {
+            callAllStartupFuncs()
+        } else {
+            isShowingTutorial = true
+        }
+    }
     
     @Published var inCameraView: Bool = true {
         didSet {
@@ -235,20 +275,6 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
         }
     }
     
-    override init() {
-        super.init()
-        checkAllPermissions()
-        discoverCameras()
-        setupShutterSound()
-        setupSession()
-        setupLightMeter()
-        startDeviceMotion()
-        syncAllLUTsToOptions()
-        if !hasCompletedTutorial {
-            isShowingTutorial = true
-        }
-    }
-    
     func checkAllPermissions() {
         // 1. 检查相机权限
         let cameraStatus = AVCaptureDevice.authorizationStatus(for: .video)
@@ -316,11 +342,11 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     
     func toggleAdjustmentMode() {
         // 1. 切换模式
-        if activeIndex != 9 && activeIndex != 8 {
+        if activeIndex != nullWidgetIndex && activeIndex != UIWidgets.Style.rawValue {
             isAdjustingValue.toggle()
         }
         
-        if activeIndex == 8 {
+        if activeIndex == UIWidgets.Style.rawValue {
             if !isAdjustingValue {
                 isAdjustingValue = true
             }
@@ -352,7 +378,7 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
         }
     }
     
-    private func setupSession() {
+    func setupSession() {
         guard !availableDevices.isEmpty else { return }
         session.beginConfiguration()
         session.sessionPreset = .photo
@@ -474,23 +500,22 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     
     private func adjustValue(direction: Int) {
         switch activeIndex {
-        case 2:
+        case UIWidgets.AFMode.rawValue:
             AFMode = nextOption(in: AFModeOptions, current: AFMode, direction: direction)
-        case 8: // STYLE
+        case UIWidgets.Style.rawValue: // STYLE
             style = nextOption(in: styleOptions, current: style, direction: direction)
-        case 4: // SS
+        case UIWidgets.SS.rawValue: // SS
             SS = nextOption(in: actualSSoptions, current: SS, direction: direction)
-        case 6: // EV
+        case UIWidgets.EV.rawValue: // EV
             let isManualMode = (SS != "AUTO" && ISO != "AUTO")
             if !isManualMode {
                 EV = nextOption(in: EVoptions, current: EV, direction: direction)
             }
-        case 7: // ISO
+        case UIWidgets.ISO.rawValue: // ISO
             ISO = nextOption(in: actualISOoptions, current: ISO, direction: direction)
-        case 1: switchCamera(direction: direction)
-        case 0: // Image Quality
+        case UIWidgets.lensSwitch.rawValue: switchCamera(direction: direction)
+        case UIWidgets.imageQuality.rawValue: // Image Quality
             imageQuality = nextOption(in: imageQualityOptions, current: imageQuality, direction: direction)
-        // 💡 你可以在这里补充 Aperture (index 5) 或 Style (index 8) 的逻辑
         default:
             break
         }
@@ -521,54 +546,27 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     }
     
     func changeParameter(direction: Int) {
+        /*
+         activeIndex: 0...maxWidgetIndex + 1
+         0...maxWidgetIndex: parameters
+         maxWidgetIndex + 1: nothing selected
+         maxWidgetIndex + 2: will be never reached, just for condition check
+         */
+        
         if isAdjustingValue {
             adjustValue(direction: direction)
         } else {
             let newIndex = activeIndex + direction
-            if newIndex >= 10 {
+            if newIndex >= maxWidgetIndex + 2 { // direction = positive
                 activeIndex = 0
-            } else if newIndex < 0 {
-                activeIndex = 10 - 1
+            } else if newIndex < 0 { // direction = negative
+                activeIndex = maxWidgetIndex + 1 // go to nothing selected index
             } else {
                 activeIndex = newIndex
             }
+            print(activeIndex, "->", newIndex)
         }
     }
-    
-    /*
-    func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
-        if let error = error { return }
-        defer { DispatchQueue.main.async { self.isCapturing = false } }
-        
-        // --- 逻辑 A: 处理 RAW (DNG) 数据 ---
-        if photo.isRawPhoto {
-            if let rawData = photo.fileDataRepresentation() {
-                saveImageDataToLibrary(rawData, isRaw: true)
-            }
-            // 如果是 DNG 模式，处理完 RAW 就可以返回了
-            if imageQuality == "DNG" { return }
-        }
-        
-        // --- 逻辑 B: 处理 JPEG/HEVC (带滤镜) 数据 ---
-        // 只有当模式包含 JPEG 时才执行以下逻辑
-        guard imageQuality != "DNG" else { return }
-        
-        // 如果当前收到的不是 RAW，说明它是那个需要套滤镜的“预览图”或“压缩图”
-        if !photo.isRawPhoto {
-            guard let imageData = photo.fileDataRepresentation(),
-                  let ciImage = CIImage(data: imageData) else { return }
-            
-            // 应用滤镜
-            let filteredImage = FilmEngine.shared.process(ciImage, styleName: style, lutIntensity: lutIntensity, grainIntensity: grainIntensity)
-            let context = CIContext()
-            guard let colorSpace = ciImage.colorSpace,
-                  let processedData = context.jpegRepresentation(of: filteredImage, colorSpace: colorSpace, options: []) else { return }
-            
-            saveImageDataToLibrary(processedData, isRaw: false)
-        }
-        
-    }
-     */
     
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         if let error = error { return }

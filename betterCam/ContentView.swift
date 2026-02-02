@@ -34,6 +34,14 @@ struct ContentView: View {
                     .zIndex(99) // 确保在最上层
             }
         }
+        .onChange(of: camera.isShowingTutorial) {
+            isShowing in
+            if !isShowing {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    camera.callAllStartupFuncs()
+                }
+            }
+        }
         .fullScreenCover(isPresented: Binding(
             get: { !camera.inCameraView }, // 如果不在相机视图，就显示管理页面
             set: { if $0 == false { camera.inCameraView = true } }

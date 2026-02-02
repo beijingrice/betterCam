@@ -51,6 +51,7 @@ class FilmEngine: ObservableObject {
         self.staticGrainOverlay = processedNoise
     }
     
+    /*
     private func applyDynamicGrain(to input: CIImage, intensity: Float) -> CIImage {
         guard let grainLayer = staticGrainOverlay else { return input }
         
@@ -71,7 +72,229 @@ class FilmEngine: ObservableObject {
             kCIInputBackgroundImageKey: input
         ])
     }
+     */
+    
+    /*
+    private func applyDynamicGrain(to input: CIImage, intensity: Float) -> CIImage {
+        guard let grainLayer = staticGrainOverlay else { return input }
+            
+            // 1. 映射参数：根据强度系数派生出尺寸和粗糙度
+            // 基础倍率 1.0，随强度最高增加到 2.5 倍大小
+            let grainSize = 1.0 + CGFloat(intensity * 1.5)
+            
+            // 粗糙度：强度越高，模糊越小（越锐利）。模糊半径从 1.5 降至 0
+            let blurRadius = CGFloat(max(0, 1.5 - (intensity * 1.5)))
 
+            // 2. 应用尺寸变换 (CGAffineTransform)
+            let scaledGrain = grainLayer.transformed(by: CGAffineTransform(scaleX: grainSize, y: grainSize))
+            
+            // 3. 应用粗糙度控制 (高斯模糊)
+            let processedGrain = scaledGrain.applyingFilter("CIGaussianBlur", parameters: [
+                kCIInputRadiusKey: blurRadius
+            ])
+            
+            // 4. 调整透明度 (Alpha)
+            // 这里的 w 系数可以稍微调高，确保在大尺寸下依然有足够的覆盖感
+            let grainWithAlpha = processedGrain
+                .applyingFilter("CIColorMatrix", parameters: [
+                    "inputAVector": CIVector(x: 0, y: 0, z: 0, w: CGFloat(intensity * 1.2))
+                ])
+            
+            // 5. 铺满并混合
+            let tiledGrain = grainWithAlpha
+                .applyingFilter("CIAffineTile")
+                .cropped(to: input.extent)
+
+            // 使用 Overlay 混合模式能更好地保留原图暗部细节
+            return input.applyingFilter("CIOverlayBlendMode", parameters: [
+                kCIInputImageKey: tiledGrain,
+                kCIInputBackgroundImageKey: input
+            ])
+    }
+     */
+    
+    /*
+    private func applyDynamicGrain(to input: CIImage, intensity: Float) -> CIImage {
+        guard let grainLayer = staticGrainOverlay else { return input }
+        
+        // 1. 计算缩放中心
+        let grainSize = 1.0 + CGFloat(intensity * 1.5)
+        let extent = grainLayer.extent
+        let center = CGPoint(x: extent.midX, y: extent.midY) // 💡 获取纹理中心点
+        
+        // 2. 实现中心缩放逻辑
+        var transform = CGAffineTransform.identity
+        transform = transform.translatedBy(x: center.x, y: center.y)      // A. 先移到中心
+        transform = transform.scaledBy(x: grainSize, y: grainSize)        // B. 进行缩放
+        transform = transform.translatedBy(x: -center.x, y: -center.y)    // C. 移回原点
+        
+        // 💡 额外步骤：加入随强度变化的微小位移，防止缩放感太死板
+        let randomShift = CGFloat(intensity * 50.0)
+        transform = transform.translatedBy(x: randomShift, y: -randomShift)
+        
+        let scaledGrain = grainLayer.transformed(by: transform)
+        
+        // 3. 后续处理（粗糙度与透明度）
+        let blurRadius = CGFloat(max(0, 1.5 - (intensity * 1.5)))
+        let processedGrain = scaledGrain.applyingFilter("CIGaussianBlur", parameters: [
+            kCIInputRadiusKey: blurRadius
+        ])
+        
+        let grainWithAlpha = processedGrain
+            .applyingFilter("CIColorMatrix", parameters: [
+                "inputAVector": CIVector(x: 0, y: 0, z: 0, w: CGFloat(intensity * 1.2))
+            ])
+        
+        // 4. 铺满与混合
+        let tiledGrain = grainWithAlpha
+            .applyingFilter("CIAffineTile")
+            .cropped(to: input.extent)
+
+        return input.applyingFilter("CIOverlayBlendMode", parameters: [
+            kCIInputImageKey: tiledGrain,
+            kCIInputBackgroundImageKey: input
+        ])
+    }
+     */
+    
+    /* - GOOD ONE
+    private func applyDynamicGrain(to input: CIImage, intensity: Float) -> CIImage {
+        // 1. 实时生成基础随机纹理
+        // 💡 重点：我们不再裁剪固定尺寸，而是每次都重新请求输出
+        guard let noise = CIFilter(name: "CIRandomGenerator")?.outputImage else { return input }
+        
+        // 2. 动态缩放 (Size)
+        // 模仿 Lightroom 的逻辑：强度越高，颗粒通常看起来越聚拢或越粗
+        let grainSize = 1.0 + CGFloat(intensity * 2.0)
+        let scaledNoise = noise.transformed(by: CGAffineTransform(scaleX: grainSize, y: grainSize))
+        
+        // 3. 动态对比度与亮度调制
+        // 💡 这里的关键是让噪点只在中间调和暗部明显，亮部收敛，这样才自然
+        let whitePoint = 1.0 - (intensity * 0.5) // 随强度调整白点
+        let processedNoise = scaledNoise
+            .applyingFilter("CIColorControls", parameters: [
+                kCIInputSaturationKey: 0,
+                kCIInputContrastKey: 1.0 + (intensity * 0.5) // 随强度增加颗粒对比度
+            ])
+            .applyingFilter("CIColorMatrix", parameters: [
+                "inputAVector": CIVector(x: 0, y: 0, z: 0, w: CGFloat(intensity * 0.6)) // 控制整体混合强度
+            ])
+
+        // 4. 使用“柔光” (Soft Light) 模式
+        // Snapseed 和 Lightroom 常用 Soft Light 或 Overlay 来实现自然过渡，
+        // 因为这两种模式不会简单地覆盖像素，而是根据原图亮度进行增益。
+        let combined = CIFilter(name: "CISoftLightBlendMode", parameters: [
+            kCIInputImageKey: processedNoise.cropped(to: input.extent),
+            kCIInputBackgroundImageKey: input
+        ])?.outputImage
+
+        return combined ?? input
+    }
+     */
+    
+    /* BETTER ONE
+    private func applyDynamicGrain(to input: CIImage, intensity: Float) -> CIImage {
+        // 1. 获取基础噪点
+        guard let noise = CIFilter(name: "CIRandomGenerator")?.outputImage else { return input }
+        
+        // 2. 计算变换参数
+        let grainSize = 1.0 + CGFloat(intensity * 2.5) // 增大一点缩放范围，让变化更明显
+        let inputExtent = input.extent
+        let center = CGPoint(x: inputExtent.midX, y: inputExtent.midY) // 💡 锁定画面中心
+        
+        // 3. 构建变换矩阵 (从中心缩放)
+        // 💡 核心逻辑：先移到中心 -> 再缩放 -> 再移回原点
+        // 这样噪点就会以屏幕中心为轴心变大，而不是往角落跑
+        var transform = CGAffineTransform.identity
+        transform = transform.translatedBy(x: center.x, y: center.y)
+        transform = transform.scaledBy(x: grainSize, y: grainSize)
+        transform = transform.translatedBy(x: -center.x, y: -center.y)
+        
+        // 💡 秘密武器：相位偏移 (Phase Shift)
+        // 随着强度改变，让噪点纹理发生巨大的位移。
+        // 这会让大脑认为这是“新生成的一层噪点”，而不是“原来的噪点被拉大了”，彻底消除缩放感。
+        let phaseShift = CGFloat(intensity * 1000.0)
+        transform = transform.translatedBy(x: phaseShift, y: phaseShift)
+        
+        let scaledNoise = noise.transformed(by: transform)
+        
+        // 4. 动态画质调优 (模拟 Lightroom 质感)
+        // 随着颗粒变大，为了防止出现马赛克方块感，我们可以略微降低锐度
+        let blurRadius = intensity * 0.5 // 极其微小的模糊，让大颗粒边缘更圆润
+        
+        let processedNoise = scaledNoise
+            .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: blurRadius]) // 柔化颗粒
+            .applyingFilter("CIColorControls", parameters: [
+                kCIInputSaturationKey: 0,
+                kCIInputContrastKey: 1.0 + (intensity * 0.8) // 增强对比度，让颗粒更扎实
+            ])
+            .applyingFilter("CIColorMatrix", parameters: [
+                // 随强度动态调整透明度：颗粒越大，单体透明度应略微降低以保持整体通透
+                "inputAVector": CIVector(x: 0, y: 0, z: 0, w: CGFloat(intensity * 0.5))
+            ])
+
+        // 5. 混合 (保持 Soft Light)
+        // 记得要在混合前 crop 到原图大小，否则性能会爆炸
+        let combined = CIFilter(name: "CISoftLightBlendMode", parameters: [
+            kCIInputImageKey: processedNoise.cropped(to: inputExtent),
+            kCIInputBackgroundImageKey: input
+        ])?.outputImage
+
+        return combined ?? input
+    }
+     */
+    
+    private func applyDynamicGrain(to input: CIImage, intensity: Float) -> CIImage {
+        // 1. 生成原始噪点
+        guard let noise = CIFilter(name: "CIRandomGenerator")?.outputImage else { return input }
+        
+        // 2. 模拟颗粒结块 (Blur - 控制尺寸)
+        // 保持原来的逻辑：强度越大，模糊半径越大，颗粒越大块
+        let blurRadius = Double(intensity * 1.5)
+        let blurredNoise = noise.applyingFilter("CIGaussianBlur", parameters: [
+            kCIInputRadiusKey: blurRadius
+        ])
+        
+        // 3. 💡 关键修改：暴力去亮 + 极端对比度
+        // 目标：把噪点层变成“白纸上的黑点”，而不是“灰纸上的灰点”
+        
+        let processedGrain = blurredNoise
+            .applyingFilter("CIColorControls", parameters: [
+                kCIInputSaturationKey: 0,    // 彻底去色
+                kCIInputContrastKey: 2.0 + (intensity * 3.0), // 极高对比度，让颗粒边缘像刀切一样硬
+                kCIInputBrightnessKey: 0.0
+            ])
+            // 💡 核心魔法：使用 ColorMatrix 进行“暗部偏移”
+            .applyingFilter("CIColorMatrix", parameters: [
+                // R, G, B 全部乘以 1 (保持原值)，但 Bias (偏移) 减去 0.3 ~ 0.5
+                // 这意味着：原来的中灰(0.5)会变成(0.1)甚至(0.0)的纯黑。
+                // 只有原来的极亮部(0.9+)才能勉强保留一点点灰度，其余全被压成黑色。
+                "inputBiasVector": CIVector(x: -0.3 - CGFloat(intensity * 0.2),
+                                            y: -0.3 - CGFloat(intensity * 0.2),
+                                            z: -0.3 - CGFloat(intensity * 0.2),
+                                            w: 0)
+            ])
+        
+        // 4. 调整透明度
+        // 因为现在是纯黑颗粒，不需要太高透明度就能看得很清楚
+        let alpha = 0.2 + (intensity * 0.1)
+        let finalGrain = processedGrain.applyingFilter("CIColorMatrix", parameters: [
+            "inputAVector": CIVector(x: 0, y: 0, z: 0, w: CGFloat(alpha))
+        ])
+
+        // 5. 混合模式改为 Overlay 或 HardLight
+        // 裁剪很重要，否则性能崩溃
+        let croppedGrain = finalGrain.cropped(to: input.extent)
+        
+        // 💡 如果你觉得 Overlay 还是不够黑，可以试试 "CILinearBurnBlendMode" (线性加深) 或 Stay with Overlay
+        // Overlay 在处理深色层时，会显著压暗背景，非常适合模拟银盐阻光效果。
+        let combined = CIFilter(name: "CIOverlayBlendMode", parameters: [
+            kCIInputImageKey: croppedGrain,
+            kCIInputBackgroundImageKey: input
+        ])?.outputImage
+
+        return combined ?? input
+    }
     private func setupInitialStyles() {
         self.availableSimulations = [
             FilmSimulation(name: "STD", type: .builtIn, filterName: nil, lutData: nil, dimension: 0, isFilm: false),
@@ -151,7 +374,7 @@ class FilmEngine: ObservableObject {
         }
         
         // 3. 💡 关键：根据 grainIntensity 应用噪点
-        if grainIntensity > 0 && styleName != "STD" {
+        if grainIntensity > 0 && styleName != "STD" && styleName != "MANAGE" {
             output = applyDynamicGrain(to: output, intensity: grainIntensity)
         }
         
