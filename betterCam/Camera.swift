@@ -756,6 +756,54 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
             }
         }
     }
+     */
+    
+    func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
+        if let error = error { return }
+        defer { DispatchQueue.main.async { self.isCapturing = false } }
+        
+        // --- 逻辑 A: 处理 RAW (DNG) 数据 ---
+        if photo.isRawPhoto {
+            if let rawData = photo.fileDataRepresentation() {
+                saveImageDataToLibrary(rawData, isRaw: true)
+            }
+            if imageQuality == "DNG" { return }
+        }
+        
+        // --- 逻辑 B: 处理 JPEG (带滤镜) 数据 ---
+        guard imageQuality != "DNG" else { return }
+        
+        if !photo.isRawPhoto {
+            guard let imageData = photo.fileDataRepresentation(),
+                  let ciImage = CIImage(data: imageData) else { return }
+            
+            // 1. 应用滤镜处理
+            let filteredImage = FilmEngine.shared.process(ciImage, styleName: style, lutIntensity: lutIntensity, grainIntensity: grainIntensity)
+            
+            // 2. 渲染为中间 CGImage
+            let context = CIContext()
+            guard let cgImage = context.createCGImage(filteredImage, from: filteredImage.extent) else { return }
+            
+            // 3. 准备手动写入元数据的 Data 对象
+            let outputData = NSMutableData()
+            guard let destination = CGImageDestinationCreateWithData(outputData as CFMutableData, UTType.jpeg.identifier as CFString, 1, nil) else { return }
+            
+            // 💡 关键点：获取并修正元数据
+            var metadata = photo.metadata
+            
+            // 确保方向被显式写入，防止 Core Image 渲染后丢失旋转信息
+            if let orientation = photo.metadata[kCGImagePropertyOrientation as String] {
+                metadata[kCGImagePropertyOrientation as String] = orientation
+            }
+            
+            // 4. 将 CGImage 和 元数据 合并写入
+            CGImageDestinationAddImage(destination, cgImage, metadata as CFDictionary)
+            
+            if CGImageDestinationFinalize(destination) {
+                saveImageDataToLibrary(outputData as Data, isRaw: false)
+            }
+        }
+    }
     
     func takePhoto() {
         guard !isCapturing else { return }
