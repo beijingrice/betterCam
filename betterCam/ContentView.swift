@@ -21,7 +21,7 @@ struct ContentView: View {
                         .recessedPanel()
                         .padding(.top)
                         .frame(height: UIScreen.main.bounds.height * 0.95)
-                        
+                    
                 }
                 ControlDialView()
                     .padding(.leading, UIScreen.main.bounds.width * 0.1)
@@ -48,6 +48,11 @@ struct ContentView: View {
         )) {
             LUTManagerView(camera: camera)
         }
+        .fullScreenCover(isPresented: Binding(
+            get: {camera.isShowingMenu},
+            set: { if $0 == true { camera.isShowingMenu = false }} )) {
+                MenuView(camera: camera)
+            }
     }
 }
 

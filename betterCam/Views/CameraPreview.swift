@@ -52,6 +52,15 @@ struct CameraPreview: View {
                 Color.black
             }
             
+            ZStack(alignment: .bottomTrailing) { // 锁定右下角
+                Color.clear // 撑开空间
+                
+                WaveformOverlay(camera: camera)
+                    .padding(.bottom, 40)  // 距离底部边距
+                    .padding(.trailing, 0) // 距离右侧边距
+                    .transition(.opacity)
+            }
+            
             // 2. 整合后的交互层 (手势 + 对焦)
             Color.clear
                 .contentShape(Rectangle())

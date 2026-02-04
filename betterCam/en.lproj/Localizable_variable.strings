@@ -9,3 +9,7 @@
 "OPEN_SETTINGS" = "Open Settings";
 "CAMERA_ACCESS" = "Camera Access";
 "PHOTO_LIB_ACCESS" = "Photo Library Write Access";
+"LOW" = "LOW";
+"HIGH" = "HIGH";
+"ON" = "ON";
+"OFF" = "OFF";

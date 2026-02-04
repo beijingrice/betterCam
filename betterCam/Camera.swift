@@ -12,6 +12,9 @@ import Combine
 import CoreImage
 import Photos
 import CoreMotion
+import UIKit
+import Metal
+import MetalKit
 
 enum CameraPermissionStatus {
     case undetermined  // 尚未询问
@@ -33,6 +36,17 @@ enum UIWidgets: Int, CaseIterable {
 }
 
 class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVCapturePhotoCaptureDelegate {
+    
+    let waveformOverlayWidth: Int = 128
+    let waveformOverlayHeight: Int = 64
+    
+    private var device: MTLDevice? = MTLCreateSystemDefaultDevice()
+    private var commandQueue: MTLCommandQueue?
+    private var pipelineState: MTLComputePipelineState?
+    private var textureCache: CVMetalTextureCache?
+        
+    @Published var waveformImage: CGImage? // 用于 UI 显示
+    
     private var maxWidgetIndex: Int {
         return UIWidgets.allCases.map { $0.rawValue }.max() ?? 0
     }
@@ -60,17 +74,57 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     // 在 Camera 类中添加
     @Published var lutIntensity: Float = 1.0  // 0.0 到 1.0
     @Published var grainIntensity: Float = 0.5 // 0.0 到 1.0
+    
+    private var previewResolutionOld: String = "HIGH"
+    @Published var previewResolution: String = "HIGH" { // Let system decide as a default
+        didSet { // check if there's better options
+            if previewResolution != previewResolutionOld {
+                applyResolutionSettings()
+                previewResolutionOld = previewResolution
+            }
+        }
+    }
+    
+    private var isConfiguring: Bool = false
+    
+    @Published var showWaveform: Bool = false
+    @Published var isShowingMenu = false {
+        didSet {
+            sessionQueue.async { [weak self] in
+                guard let self = self else { return }
+                if !inCameraView {
+                    if self.session.isRunning {
+                        self.session.stopRunning()
+                    }
+                } else {
+                    if !self.session.isRunning {
+                        self.session.startRunning()
+                    }
+                }
+            }
+        }
+    }
 
     // 定义一个临时的起始值，用于手势计算
     private var startLutIntensity: Float = 0.0
     private var startGrainIntensity: Float = 0.0
     
+    private func setupTextureCache() {
+        guard let device = device else { return }
+        CVMetalTextureCacheCreate(kCFAllocatorDefault, nil, device, nil, &textureCache)
+    }
+    
     func callAllStartupFuncs() {
+        setupMetal()
+        setupTextureCache()
+        setDefaultResolution()
         checkAllPermissions()
         discoverCameras()
         setupShutterSound()
         setupSession()
         setupLightMeter()
+        setupLightMeter()
+        applyResolutionSettings()
         startDeviceMotion()
         syncAllLUTsToOptions()
     }
@@ -338,6 +392,30 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
             print("切换失败: \(error)")
         }
         session.commitConfiguration()
+        self.updateApertureInfo()
+    }
+    
+    func applyResolutionSettings() {
+        guard !isConfiguring else { return }
+        sessionQueue.async { [weak self] in
+            guard let self = self else { return }
+            self.isConfiguring = true
+            
+            let preset: AVCaptureSession.Preset = (self.previewResolution == "LOW") ? .vga640x480 : .photo
+            
+            if self.session.sessionPreset != preset {
+                self.session.beginConfiguration()
+                if self.session.canSetSessionPreset(preset) {
+                    self.session.sessionPreset = preset
+                }
+                self.session.commitConfiguration()
+                
+                // 💡 给硬件一点点“呼吸”时间再解锁
+                Thread.sleep(forTimeInterval: 0.1)
+            }
+            
+            self.isConfiguring = false
+        }
     }
     
     func toggleAdjustmentMode() {
@@ -360,6 +438,16 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
             }
         }
         
+        if activeIndex == UIWidgets.MENU.rawValue {
+            if !isAdjustingValue {
+                isAdjustingValue = true
+            } else {
+                isShowingMenu = true
+                isAdjustingValue = false
+            }
+        }
+        print(isShowingMenu)
+        
         // 2. 物理反馈：按下时震动一下
         // 这里使用 medium 震动，区别于拨轮旋转时的 light 震动
         let generator = UIImpactFeedbackGenerator(style: .heavy)
@@ -381,17 +469,22 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     func setupSession() {
         guard !availableDevices.isEmpty else { return }
         session.beginConfiguration()
-        session.sessionPreset = .photo
-        defer {
-            self.session.commitConfiguration()
-        }
+        
+        // 💡 确保分辨率设置已经进入队列
+        self.applyResolutionSettings()
+        
+        // 移除 defer 中的 commit，改为在末尾手动 commit 更好控制顺序
         
         guard let videoDevice = availableDevices[currentDeviceIndex] ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
               let videoDeviceInput = try? AVCaptureDeviceInput(device: videoDevice),
-              session.canAddInput(videoDeviceInput) else { return }
+              session.canAddInput(videoDeviceInput) else {
+            session.commitConfiguration()
+            return
+        }
+        
         session.addInput(videoDeviceInput)
         
-        self.Aperture = String(format: "F%.1f", videoDevice.lensAperture)
+        // 💡 移除这里直接对 self.Aperture 的赋值，统一由 updateApertureInfo 处理
         
         self.actualSSoptions = self.SSoptions.supportedSS(for: videoDevice)
         self.actualISOoptions = self.ISOoptions.supportedISO(for: videoDevice).formattedISOoptions()
@@ -409,13 +502,31 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
         session.commitConfiguration()
         print("AF Mode:", videoDevice.focusMode)
         
-        DispatchQueue.global(qos: .userInitiated).async {
+        // 💡 重点修改：整合启动与光圈更新
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            
+            // 1. 开启 Session
             self.session.startRunning()
+            
+            // 2. 检查 Session 是否成功运行
+            if self.session.isRunning {
+                // 💡 3. 延迟 0.1-0.2 秒读取。这是针对 iPhone 16/17 Pro 处理延迟的“玄学补丁”
+                // 此时硬件已经开始输出预览流，寄存器里的光圈值已经更新
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    self.updateApertureInfo()
+                }
+            }
         }
     }
     
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        
+        if showWaveform {
+            self.processWaveform(from: pixelBuffer)
+        }
+        
         let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
         
         // 💡 传入实时强度参数
@@ -564,7 +675,38 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
             } else {
                 activeIndex = newIndex
             }
-            print(activeIndex, "->", newIndex)
+        }
+    }
+    
+    /// 💡 读取当前镜头的光圈值并更新 UI 绑定变量
+    func updateApertureInfo() {
+        // 必须在 sessionQueue 中执行，避免与 session 配置产生死锁
+        sessionQueue.async { [weak self] in
+            guard let self = self else { return }
+            
+            // 获取当前正在使用的物理设备
+            guard self.availableDevices.indices.contains(self.currentDeviceIndex) else { return }
+            let device = self.availableDevices[self.currentDeviceIndex]
+            
+            do {
+                // 💡 关键：iOS 26 的 Pro 机型通常需要 lock 状态才能读取某些实时硬件参数
+                try device.lockForConfiguration()
+                
+                // 尝试读取实时值
+                let aperture = device.lensAperture
+                
+                // 💡 保底逻辑：如果实时值为 0，则读取该镜头支持的最大光圈元数据
+                let finalAperture = aperture > 0 ? aperture : (device.lensAperture > 0 ? device.lensAperture : 1.8)
+                
+                // 回到主线程更新 @Published 变量以刷新 UI
+                DispatchQueue.main.async {
+                    self.Aperture = "F" + String(finalAperture)
+                }
+                
+                device.unlockForConfiguration()
+            } catch {
+                print("❌ 无法锁定设备以读取光圈: \(error)")
+            }
         }
     }
     
@@ -772,5 +914,142 @@ extension Array where Element == String {
         }
         
         return nil
+    }
+}
+
+extension UIDevice {
+    // 💡 获取硬件标识符（如 "iPhone15,3"）
+    var modelIdentifier: String {
+        var systemInfo = utsname()
+        uname(&systemInfo)
+        let machineMirror = Mirror(reflecting: systemInfo.machine)
+        let identifier = machineMirror.children.reduce("") { identifier, element in
+            guard let value = element.value as? Int8, value != 0 else { return identifier }
+            return identifier + String(UnicodeScalar(UInt8(value)))
+        }
+        return identifier
+    }
+}
+
+enum DevicePerformanceTier {
+    case pro      // iPhone 15 Pro 及以上：支持 4K/ProRes 实时预览
+    case high     // iPhone 13 - 14 系列：稳定 4K
+    case standard // 旧款设备：建议默认 1080P 以维持帧率
+}
+
+extension Camera {
+    func setupMetal() {
+        guard let device = device else { return }
+        commandQueue = device.makeCommandQueue()
+        let library = device.makeDefaultLibrary()
+        if let kernel = library?.makeFunction(name: "waveformKernel") {
+            pipelineState = try? device.makeComputePipelineState(function: kernel)
+        }
+    }
+
+        // 💡 在 captureOutput 中调用异步 Metal 计算
+    func processWaveform(from pixelBuffer: CVPixelBuffer) {
+        // 💡 只有开启显示且硬件就绪时才执行
+        guard showWaveform,
+              let pipeline = pipelineState,
+              let queue = commandQueue,
+              let cache = textureCache else { return }
+        
+        // 1. 将 CVPixelBuffer 转换为输入纹理 (零拷贝)
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        var cvTexture: CVMetalTexture?
+        
+        CVMetalTextureCacheCreateTextureFromImage(kCFAllocatorDefault, cache, pixelBuffer, nil, .bgra8Unorm, width, height, 0, &cvTexture)
+        
+        guard let inputTexture = CVMetalTextureGetTexture(cvTexture!) else { return }
+        
+        let desc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm, width: waveformOverlayWidth, height: waveformOverlayHeight, mipmapped: false)
+        desc.usage = [.shaderWrite, .shaderRead]
+        guard let outputTexture = device?.makeTexture(descriptor: desc) else { return }
+        
+        // 3. 配置并执行 Metal 指令
+        guard let commandBuffer = queue.makeCommandBuffer(),
+              let encoder = commandBuffer.makeComputeCommandEncoder() else { return }
+        
+        encoder.setComputePipelineState(pipeline)
+        encoder.setTexture(inputTexture, index: 0)
+        encoder.setTexture(outputTexture, index: 1)
+        
+        // 计算 Threadgroups (根据输出纹理大小分配)
+        let threadGroupSize = MTLSize(width: 16, height: 16, depth: 1)
+        let threadGroups = MTLSize(width: (outputTexture.width + 15) / 16,
+                                   height: (outputTexture.height + 15) / 16,
+                                   depth: 1)
+        
+        encoder.dispatchThreadgroups(threadGroups, threadsPerThreadgroup: threadGroupSize)
+        encoder.endEncoding()
+        
+        // 4. 异步回调处理输出图像
+        commandBuffer.addCompletedHandler { [weak self] _ in
+            guard let self = self else { return }
+            
+            // 💡 关键：将计算结果转为 CGImage
+            // 注意：这里需要一个辅助函数来从 Texture 读取数据，为了性能，建议直接在 UI 层用 MTKView 显示纹理
+            let cgImage = self.makeCGImage(from: outputTexture)
+            
+            DispatchQueue.main.async {
+                self.waveformImage = cgImage
+            }
+        }
+        
+        commandBuffer.commit()
+    }
+    
+    func makeCGImage(from texture: MTLTexture) -> CGImage? {
+        let width = texture.width
+        let height = texture.height
+        let rowBytes = width * 4
+        var data = [UInt8](repeating: 0, count: rowBytes * height)
+        
+        texture.getBytes(&data, bytesPerRow: rowBytes, from: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0)
+        
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
+        guard let provider = CGDataProvider(data: Data(data) as CFData) else { return nil }
+        
+        return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: rowBytes, space: colorSpace, bitmapInfo: bitmapInfo, provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
+    }
+    
+    var performanceTier: DevicePerformanceTier {
+        let id = UIDevice.current.modelIdentifier
+        
+        // 1. 提取型号中的主要数字部分（例如从 "iPhone16,1" 提取出 16）
+        // 💡 技巧：使用 Scanner 提取字符串中的第一个数字
+        let scanner = Scanner(string: id)
+        _ = scanner.scanUpToCharacters(from: .decimalDigits)
+        let modelMajorVersion = scanner.scanInt() ?? 0
+        
+        // 2. 基于数字范围进行“未来兼容”判定
+        // iPhone 15 系列的代号是 16
+        // iPhone 16 系列的代号是 17
+        
+        if modelMajorVersion >= 17 {
+            // 💡 判定为未来机型或现有的 Pro 系列（支持 ProRes / 4K）
+            return .pro
+        } else if modelMajorVersion >= 15 {
+            // 💡 iPhone 13 (14,x) 到 iPhone 15 (16,x) 之间
+            return .high
+        } else {
+            // 💡 更旧的设备，默认 1080P 以保证实时噪点渲染不掉帧
+            return .standard
+        }
+    }
+        
+        // 💡 根据型号初始化默认分辨率
+    func setDefaultResolution() {
+        switch performanceTier {
+        case .pro:
+            self.previewResolution = "HIGH"
+        case .high:
+            self.previewResolution = "HIGH"
+        case .standard:
+            self.previewResolution = "LOW"
+        }
     }
 }
