@@ -12,6 +12,9 @@ import Combine
 import CoreImage
 import Photos
 import CoreMotion
+import UIKit
+import Metal
+import MetalKit
 
 enum CameraPermissionStatus {
     case undetermined  // 尚未询问
@@ -19,7 +22,37 @@ enum CameraPermissionStatus {
     case denied        // 已拒绝
 }
 
+enum UIWidgets: Int, CaseIterable {
+    case imageQuality   = 0
+    case lensSwitch     = 1
+    case AFMode         = 2
+    case WBMode         = 3
+    case MENU           = 4
+    case SS             = 5
+    case aperture       = 6
+    case EV             = 7
+    case ISO            = 8
+    case Style          = 9
+}
+
 class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVCapturePhotoCaptureDelegate {
+    
+    let waveformOverlayWidth: Int = 128
+    let waveformOverlayHeight: Int = 64
+    
+    private var device: MTLDevice? = MTLCreateSystemDefaultDevice()
+    private var commandQueue: MTLCommandQueue?
+    private var pipelineState: MTLComputePipelineState?
+    private var textureCache: CVMetalTextureCache?
+        
+    @Published var waveformImage: CGImage? // 用于 UI 显示
+    
+    private var maxWidgetIndex: Int {
+        return UIWidgets.allCases.map { $0.rawValue }.max() ?? 0
+    }
+    private var nullWidgetIndex: Int {
+        return maxWidgetIndex + 1
+    }
     private var exposureOffsetObserver: NSKeyValueObservation?
     private var smoothedOffset: Float = 0.0 // 💡 用于平滑存储
     private var lastUpdateTimestamp: TimeInterval = 0
@@ -36,13 +69,74 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     @AppStorage("hasCompletedTutorial") var hasCompletedTutorial: Bool = false
     @Published var isShowingTutorial: Bool = false
     
+    @Published var showingMENU: Bool = false
+    
     // 在 Camera 类中添加
     @Published var lutIntensity: Float = 1.0  // 0.0 到 1.0
-    @Published var grainIntensity: Float = 0.0 // 0.0 到 1.0
+    @Published var grainIntensity: Float = 0.5 // 0.0 到 1.0
+    
+    private var previewResolutionOld: String = "HIGH"
+    @Published var previewResolution: String = "HIGH" { // Let system decide as a default
+        didSet { // check if there's better options
+            if previewResolution != previewResolutionOld {
+                applyResolutionSettings()
+                previewResolutionOld = previewResolution
+            }
+        }
+    }
+    
+    private var isConfiguring: Bool = false
+    
+    @Published var showWaveform: Bool = false
+    @Published var isShowingMenu = false {
+        didSet {
+            sessionQueue.async { [weak self] in
+                guard let self = self else { return }
+                if !inCameraView {
+                    if self.session.isRunning {
+                        self.session.stopRunning()
+                    }
+                } else {
+                    if !self.session.isRunning {
+                        self.session.startRunning()
+                    }
+                }
+            }
+        }
+    }
 
     // 定义一个临时的起始值，用于手势计算
     private var startLutIntensity: Float = 0.0
     private var startGrainIntensity: Float = 0.0
+    
+    private func setupTextureCache() {
+        guard let device = device else { return }
+        CVMetalTextureCacheCreate(kCFAllocatorDefault, nil, device, nil, &textureCache)
+    }
+    
+    func callAllStartupFuncs() {
+        setupMetal()
+        setupTextureCache()
+        setDefaultResolution()
+        checkAllPermissions()
+        discoverCameras()
+        setupShutterSound()
+        setupSession()
+        setupLightMeter()
+        setupLightMeter()
+        applyResolutionSettings()
+        startDeviceMotion()
+        syncAllLUTsToOptions()
+    }
+    
+    override init() {
+        super.init()
+        if hasCompletedTutorial {
+            callAllStartupFuncs()
+        } else {
+            isShowingTutorial = true
+        }
+    }
     
     @Published var inCameraView: Bool = true {
         didSet {
@@ -235,20 +329,6 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
         }
     }
     
-    override init() {
-        super.init()
-        checkAllPermissions()
-        discoverCameras()
-        setupShutterSound()
-        setupSession()
-        setupLightMeter()
-        startDeviceMotion()
-        syncAllLUTsToOptions()
-        if !hasCompletedTutorial {
-            isShowingTutorial = true
-        }
-    }
-    
     func checkAllPermissions() {
         // 1. 检查相机权限
         let cameraStatus = AVCaptureDevice.authorizationStatus(for: .video)
@@ -312,15 +392,39 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
             print("切换失败: \(error)")
         }
         session.commitConfiguration()
+        self.updateApertureInfo()
+    }
+    
+    func applyResolutionSettings() {
+        guard !isConfiguring else { return }
+        sessionQueue.async { [weak self] in
+            guard let self = self else { return }
+            self.isConfiguring = true
+            
+            let preset: AVCaptureSession.Preset = (self.previewResolution == "LOW") ? .vga640x480 : .photo
+            
+            if self.session.sessionPreset != preset {
+                self.session.beginConfiguration()
+                if self.session.canSetSessionPreset(preset) {
+                    self.session.sessionPreset = preset
+                }
+                self.session.commitConfiguration()
+                
+                // 💡 给硬件一点点“呼吸”时间再解锁
+                Thread.sleep(forTimeInterval: 0.1)
+            }
+            
+            self.isConfiguring = false
+        }
     }
     
     func toggleAdjustmentMode() {
         // 1. 切换模式
-        if activeIndex != 9 && activeIndex != 8 {
+        if activeIndex != nullWidgetIndex && activeIndex != UIWidgets.Style.rawValue {
             isAdjustingValue.toggle()
         }
         
-        if activeIndex == 8 {
+        if activeIndex == UIWidgets.Style.rawValue {
             if !isAdjustingValue {
                 isAdjustingValue = true
             }
@@ -333,6 +437,16 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
                 }
             }
         }
+        
+        if activeIndex == UIWidgets.MENU.rawValue {
+            if !isAdjustingValue {
+                isAdjustingValue = true
+            } else {
+                isShowingMenu = true
+                isAdjustingValue = false
+            }
+        }
+        print(isShowingMenu)
         
         // 2. 物理反馈：按下时震动一下
         // 这里使用 medium 震动，区别于拨轮旋转时的 light 震动
@@ -352,20 +466,25 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
         }
     }
     
-    private func setupSession() {
+    func setupSession() {
         guard !availableDevices.isEmpty else { return }
         session.beginConfiguration()
-        session.sessionPreset = .photo
-        defer {
-            self.session.commitConfiguration()
-        }
+        
+        // 💡 确保分辨率设置已经进入队列
+        self.applyResolutionSettings()
+        
+        // 移除 defer 中的 commit，改为在末尾手动 commit 更好控制顺序
         
         guard let videoDevice = availableDevices[currentDeviceIndex] ?? AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back),
               let videoDeviceInput = try? AVCaptureDeviceInput(device: videoDevice),
-              session.canAddInput(videoDeviceInput) else { return }
+              session.canAddInput(videoDeviceInput) else {
+            session.commitConfiguration()
+            return
+        }
+        
         session.addInput(videoDeviceInput)
         
-        self.Aperture = String(format: "F%.1f", videoDevice.lensAperture)
+        // 💡 移除这里直接对 self.Aperture 的赋值，统一由 updateApertureInfo 处理
         
         self.actualSSoptions = self.SSoptions.supportedSS(for: videoDevice)
         self.actualISOoptions = self.ISOoptions.supportedISO(for: videoDevice).formattedISOoptions()
@@ -383,13 +502,31 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
         session.commitConfiguration()
         print("AF Mode:", videoDevice.focusMode)
         
-        DispatchQueue.global(qos: .userInitiated).async {
+        // 💡 重点修改：整合启动与光圈更新
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            
+            // 1. 开启 Session
             self.session.startRunning()
+            
+            // 2. 检查 Session 是否成功运行
+            if self.session.isRunning {
+                // 💡 3. 延迟 0.1-0.2 秒读取。这是针对 iPhone 16/17 Pro 处理延迟的“玄学补丁”
+                // 此时硬件已经开始输出预览流，寄存器里的光圈值已经更新
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    self.updateApertureInfo()
+                }
+            }
         }
     }
     
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+        
+        if showWaveform {
+            self.processWaveform(from: pixelBuffer)
+        }
+        
         let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
         
         // 💡 传入实时强度参数
@@ -474,23 +611,22 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     
     private func adjustValue(direction: Int) {
         switch activeIndex {
-        case 2:
+        case UIWidgets.AFMode.rawValue:
             AFMode = nextOption(in: AFModeOptions, current: AFMode, direction: direction)
-        case 8: // STYLE
+        case UIWidgets.Style.rawValue: // STYLE
             style = nextOption(in: styleOptions, current: style, direction: direction)
-        case 4: // SS
+        case UIWidgets.SS.rawValue: // SS
             SS = nextOption(in: actualSSoptions, current: SS, direction: direction)
-        case 6: // EV
+        case UIWidgets.EV.rawValue: // EV
             let isManualMode = (SS != "AUTO" && ISO != "AUTO")
             if !isManualMode {
                 EV = nextOption(in: EVoptions, current: EV, direction: direction)
             }
-        case 7: // ISO
+        case UIWidgets.ISO.rawValue: // ISO
             ISO = nextOption(in: actualISOoptions, current: ISO, direction: direction)
-        case 1: switchCamera(direction: direction)
-        case 0: // Image Quality
+        case UIWidgets.lensSwitch.rawValue: switchCamera(direction: direction)
+        case UIWidgets.imageQuality.rawValue: // Image Quality
             imageQuality = nextOption(in: imageQualityOptions, current: imageQuality, direction: direction)
-        // 💡 你可以在这里补充 Aperture (index 5) 或 Style (index 8) 的逻辑
         default:
             break
         }
@@ -521,21 +657,59 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     }
     
     func changeParameter(direction: Int) {
+        /*
+         activeIndex: 0...maxWidgetIndex + 1
+         0...maxWidgetIndex: parameters
+         maxWidgetIndex + 1: nothing selected
+         maxWidgetIndex + 2: will be never reached, just for condition check
+         */
+        
         if isAdjustingValue {
             adjustValue(direction: direction)
         } else {
             let newIndex = activeIndex + direction
-            if newIndex >= 10 {
+            if newIndex >= maxWidgetIndex + 2 { // direction = positive
                 activeIndex = 0
-            } else if newIndex < 0 {
-                activeIndex = 10 - 1
+            } else if newIndex < 0 { // direction = negative
+                activeIndex = maxWidgetIndex + 1 // go to nothing selected index
             } else {
                 activeIndex = newIndex
             }
         }
     }
     
-    /*
+    /// 💡 读取当前镜头的光圈值并更新 UI 绑定变量
+    func updateApertureInfo() {
+        // 必须在 sessionQueue 中执行，避免与 session 配置产生死锁
+        sessionQueue.async { [weak self] in
+            guard let self = self else { return }
+            
+            // 获取当前正在使用的物理设备
+            guard self.availableDevices.indices.contains(self.currentDeviceIndex) else { return }
+            let device = self.availableDevices[self.currentDeviceIndex]
+            
+            do {
+                // 💡 关键：iOS 26 的 Pro 机型通常需要 lock 状态才能读取某些实时硬件参数
+                try device.lockForConfiguration()
+                
+                // 尝试读取实时值
+                let aperture = device.lensAperture
+                
+                // 💡 保底逻辑：如果实时值为 0，则读取该镜头支持的最大光圈元数据
+                let finalAperture = aperture > 0 ? aperture : (device.lensAperture > 0 ? device.lensAperture : 1.8)
+                
+                // 回到主线程更新 @Published 变量以刷新 UI
+                DispatchQueue.main.async {
+                    self.Aperture = "F" + String(finalAperture)
+                }
+                
+                device.unlockForConfiguration()
+            } catch {
+                print("❌ 无法锁定设备以读取光圈: \(error)")
+            }
+        }
+    }
+    
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         if let error = error { return }
         defer { DispatchQueue.main.async { self.isCapturing = false } }
@@ -545,28 +719,42 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
             if let rawData = photo.fileDataRepresentation() {
                 saveImageDataToLibrary(rawData, isRaw: true)
             }
-            // 如果是 DNG 模式，处理完 RAW 就可以返回了
             if imageQuality == "DNG" { return }
         }
         
-        // --- 逻辑 B: 处理 JPEG/HEVC (带滤镜) 数据 ---
-        // 只有当模式包含 JPEG 时才执行以下逻辑
+        // --- 逻辑 B: 处理 JPEG (带滤镜) 数据 ---
         guard imageQuality != "DNG" else { return }
         
-        // 如果当前收到的不是 RAW，说明它是那个需要套滤镜的“预览图”或“压缩图”
         if !photo.isRawPhoto {
             guard let imageData = photo.fileDataRepresentation(),
                   let ciImage = CIImage(data: imageData) else { return }
             
-            // 应用滤镜
+            // 1. 应用滤镜处理
             let filteredImage = FilmEngine.shared.process(ciImage, styleName: style, lutIntensity: lutIntensity, grainIntensity: grainIntensity)
-            let context = CIContext()
-            guard let colorSpace = ciImage.colorSpace,
-                  let processedData = context.jpegRepresentation(of: filteredImage, colorSpace: colorSpace, options: []) else { return }
             
-            saveImageDataToLibrary(processedData, isRaw: false)
+            // 2. 渲染为中间 CGImage
+            let context = CIContext()
+            guard let cgImage = context.createCGImage(filteredImage, from: filteredImage.extent) else { return }
+            
+            // 3. 准备手动写入元数据的 Data 对象
+            let outputData = NSMutableData()
+            guard let destination = CGImageDestinationCreateWithData(outputData as CFMutableData, UTType.jpeg.identifier as CFString, 1, nil) else { return }
+            
+            // 💡 关键点：获取并修正元数据
+            var metadata = photo.metadata
+            
+            // 确保方向被显式写入，防止 Core Image 渲染后丢失旋转信息
+            if let orientation = photo.metadata[kCGImagePropertyOrientation as String] {
+                metadata[kCGImagePropertyOrientation as String] = orientation
+            }
+            
+            // 4. 将 CGImage 和 元数据 合并写入
+            CGImageDestinationAddImage(destination, cgImage, metadata as CFDictionary)
+            
+            if CGImageDestinationFinalize(destination) {
+                saveImageDataToLibrary(outputData as Data, isRaw: false)
+            }
         }
-        
     }
      */
     
@@ -774,5 +962,142 @@ extension Array where Element == String {
         }
         
         return nil
+    }
+}
+
+extension UIDevice {
+    // 💡 获取硬件标识符（如 "iPhone15,3"）
+    var modelIdentifier: String {
+        var systemInfo = utsname()
+        uname(&systemInfo)
+        let machineMirror = Mirror(reflecting: systemInfo.machine)
+        let identifier = machineMirror.children.reduce("") { identifier, element in
+            guard let value = element.value as? Int8, value != 0 else { return identifier }
+            return identifier + String(UnicodeScalar(UInt8(value)))
+        }
+        return identifier
+    }
+}
+
+enum DevicePerformanceTier {
+    case pro      // iPhone 15 Pro 及以上：支持 4K/ProRes 实时预览
+    case high     // iPhone 13 - 14 系列：稳定 4K
+    case standard // 旧款设备：建议默认 1080P 以维持帧率
+}
+
+extension Camera {
+    func setupMetal() {
+        guard let device = device else { return }
+        commandQueue = device.makeCommandQueue()
+        let library = device.makeDefaultLibrary()
+        if let kernel = library?.makeFunction(name: "waveformKernel") {
+            pipelineState = try? device.makeComputePipelineState(function: kernel)
+        }
+    }
+
+        // 💡 在 captureOutput 中调用异步 Metal 计算
+    func processWaveform(from pixelBuffer: CVPixelBuffer) {
+        // 💡 只有开启显示且硬件就绪时才执行
+        guard showWaveform,
+              let pipeline = pipelineState,
+              let queue = commandQueue,
+              let cache = textureCache else { return }
+        
+        // 1. 将 CVPixelBuffer 转换为输入纹理 (零拷贝)
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        var cvTexture: CVMetalTexture?
+        
+        CVMetalTextureCacheCreateTextureFromImage(kCFAllocatorDefault, cache, pixelBuffer, nil, .bgra8Unorm, width, height, 0, &cvTexture)
+        
+        guard let inputTexture = CVMetalTextureGetTexture(cvTexture!) else { return }
+        
+        let desc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm, width: waveformOverlayWidth, height: waveformOverlayHeight, mipmapped: false)
+        desc.usage = [.shaderWrite, .shaderRead]
+        guard let outputTexture = device?.makeTexture(descriptor: desc) else { return }
+        
+        // 3. 配置并执行 Metal 指令
+        guard let commandBuffer = queue.makeCommandBuffer(),
+              let encoder = commandBuffer.makeComputeCommandEncoder() else { return }
+        
+        encoder.setComputePipelineState(pipeline)
+        encoder.setTexture(inputTexture, index: 0)
+        encoder.setTexture(outputTexture, index: 1)
+        
+        // 计算 Threadgroups (根据输出纹理大小分配)
+        let threadGroupSize = MTLSize(width: 16, height: 16, depth: 1)
+        let threadGroups = MTLSize(width: (outputTexture.width + 15) / 16,
+                                   height: (outputTexture.height + 15) / 16,
+                                   depth: 1)
+        
+        encoder.dispatchThreadgroups(threadGroups, threadsPerThreadgroup: threadGroupSize)
+        encoder.endEncoding()
+        
+        // 4. 异步回调处理输出图像
+        commandBuffer.addCompletedHandler { [weak self] _ in
+            guard let self = self else { return }
+            
+            // 💡 关键：将计算结果转为 CGImage
+            // 注意：这里需要一个辅助函数来从 Texture 读取数据，为了性能，建议直接在 UI 层用 MTKView 显示纹理
+            let cgImage = self.makeCGImage(from: outputTexture)
+            
+            DispatchQueue.main.async {
+                self.waveformImage = cgImage
+            }
+        }
+        
+        commandBuffer.commit()
+    }
+    
+    func makeCGImage(from texture: MTLTexture) -> CGImage? {
+        let width = texture.width
+        let height = texture.height
+        let rowBytes = width * 4
+        var data = [UInt8](repeating: 0, count: rowBytes * height)
+        
+        texture.getBytes(&data, bytesPerRow: rowBytes, from: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0)
+        
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
+        guard let provider = CGDataProvider(data: Data(data) as CFData) else { return nil }
+        
+        return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: rowBytes, space: colorSpace, bitmapInfo: bitmapInfo, provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
+    }
+    
+    var performanceTier: DevicePerformanceTier {
+        let id = UIDevice.current.modelIdentifier
+        
+        // 1. 提取型号中的主要数字部分（例如从 "iPhone16,1" 提取出 16）
+        // 💡 技巧：使用 Scanner 提取字符串中的第一个数字
+        let scanner = Scanner(string: id)
+        _ = scanner.scanUpToCharacters(from: .decimalDigits)
+        let modelMajorVersion = scanner.scanInt() ?? 0
+        
+        // 2. 基于数字范围进行“未来兼容”判定
+        // iPhone 15 系列的代号是 16
+        // iPhone 16 系列的代号是 17
+        
+        if modelMajorVersion >= 17 {
+            // 💡 判定为未来机型或现有的 Pro 系列（支持 ProRes / 4K）
+            return .pro
+        } else if modelMajorVersion >= 15 {
+            // 💡 iPhone 13 (14,x) 到 iPhone 15 (16,x) 之间
+            return .high
+        } else {
+            // 💡 更旧的设备，默认 1080P 以保证实时噪点渲染不掉帧
+            return .standard
+        }
+    }
+        
+        // 💡 根据型号初始化默认分辨率
+    func setDefaultResolution() {
+        switch performanceTier {
+        case .pro:
+            self.previewResolution = "HIGH"
+        case .high:
+            self.previewResolution = "HIGH"
+        case .standard:
+            self.previewResolution = "LOW"
+        }
     }
 }

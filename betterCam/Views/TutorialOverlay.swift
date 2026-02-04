@@ -192,7 +192,7 @@ struct TutorialOverlay: View {
                 Spacer()
                 
                 nextButton(label: "Start Shooting") {
-                    withAnimation {
+                    withAnimation(.easeInOut(duration: 0.5)) {
                         camera.hasCompletedTutorial = true
                         camera.isShowingTutorial = false
                     }

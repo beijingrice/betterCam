@@ -12,15 +12,15 @@ struct BottomBarView: View {
     var body: some View {
         HStack(spacing: 0) {
             Group {
-                ParameterItem(title: camera.SS, index: 4)
+                ParameterItem(title: camera.SS, index: UIWidgets.SS.rawValue)
                 Spacer()
-                ParameterItem(title: camera.Aperture, index: 5)
+                ParameterItem(title: camera.Aperture, index: UIWidgets.aperture.rawValue)
                 Spacer()
-                ParameterItem(title: camera.EV, index: 6)
+                ParameterItem(title: camera.EV, index: UIWidgets.EV.rawValue)
                 Spacer()
-                ParameterItem(title: camera.ISO, index: 7)
+                ParameterItem(title: camera.ISO, index: UIWidgets.ISO.rawValue)
                 Spacer()
-                ParameterItem(title: camera.style, index: 8)
+                ParameterItem(title: camera.style, index: UIWidgets.Style.rawValue)
             }
             
         }

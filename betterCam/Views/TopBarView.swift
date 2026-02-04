@@ -11,18 +11,20 @@ struct TopBarView: View {
     @EnvironmentObject var camera: Camera
     var body: some View {
         HStack {
-            ParameterItem(title: camera.imageQuality, index: 0)
+            ParameterItem(title: camera.imageQuality, index: UIWidgets.imageQuality.rawValue)
             Spacer()
             ParameterItem(
                             title: camera.availableDevices.isEmpty ? "1x" :
                                    (camera.currentDeviceIndex == 0 ? "1x" :
                                     camera.currentDeviceIndex == 1 ? "0.5x" : "3x"),
-                            index: 1
+                            index: UIWidgets.lensSwitch.rawValue
                         )
             Spacer()
-            ParameterItem(title: camera.AFMode, index: 2)
+            ParameterItem(title: camera.AFMode, index: UIWidgets.AFMode.rawValue)
             Spacer()
-            ParameterItem(title: camera.WBMode, index: 3)
+            ParameterItem(title: camera.WBMode, index: UIWidgets.WBMode.rawValue)
+            Spacer()
+            ParameterItem(title: "MENU", index: UIWidgets.MENU.rawValue)
         }
         .padding()
         .frame(height: 40)

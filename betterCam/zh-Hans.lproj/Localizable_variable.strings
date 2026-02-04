@@ -9,3 +9,7 @@
 "OPEN_SETTINGS" = "打开设置";
 "CAMERA_ACCESS" = "访问相机";
 "PHOTO_LIB_ACCESS" = "写入相册";
+"LOW" = "低画质";
+"HIGH" = "高画质";
+"ON" = "开";
+"OFF" = "关";

@@ -9,3 +9,7 @@
 "OPEN_SETTINGS" = "設定を開く";
 "CAMERA_ACCESS" = "カメラへのアクセス";
 "PHOTO_LIB_ACCESS" = "写真への書き込み";
+"LOW" = "低画質";
+"HIGH" = "高画質";
+"ON" = "オン";
+"OFF" = "オフ";

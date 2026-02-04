@@ -28,6 +28,7 @@ struct ParameterItem: View {
         .contentShape(Rectangle())
         .onTapGesture {
             camera.activeIndex = index
+            camera.isAdjustingValue = false
         }
     }
 }

@@ -46,32 +46,66 @@ class FilmEngine: ObservableObject {
                 kCIInputSaturationKey: 0,
                 kCIInputContrastKey: 1.1
             ])
-            .applyingFilter("CIExposureAdjust", parameters: [kCIInputEVKey: -3.5])
+            .applyingFilter("CIExposureAdjust", parameters: [kCIInputEVKey: -2.5])
         
         self.staticGrainOverlay = processedNoise
     }
     
+    
     private func applyDynamicGrain(to input: CIImage, intensity: Float) -> CIImage {
-        guard let grainLayer = staticGrainOverlay else { return input }
+        // 1. 生成原始噪点
+        guard let noise = CIFilter(name: "CIRandomGenerator")?.outputImage else { return input }
         
-        // 1. 调整噪点图的透明度来控制强度
-        let grainWithIntensity = grainLayer
+        // 2. 模拟颗粒结块 (Blur - 控制尺寸)
+        // 保持原来的逻辑：强度越大，模糊半径越大，颗粒越大块
+        let blurRadius = Double(intensity * 1.5)
+        let blurredNoise = noise.applyingFilter("CIGaussianBlur", parameters: [
+            kCIInputRadiusKey: blurRadius
+        ])
+        
+        // 3. 💡 关键修改：暴力去亮 + 极端对比度
+        // 目标：把噪点层变成“白纸上的黑点”，而不是“灰纸上的灰点”
+        
+        let processedGrain = blurredNoise
+            .applyingFilter("CIColorControls", parameters: [
+                kCIInputSaturationKey: 0,    // 彻底去色
+                kCIInputContrastKey: 2.0 + (intensity * 3.0), // 极高对比度，让颗粒边缘像刀切一样硬
+                kCIInputBrightnessKey: 0.0
+            ])
+            // 💡 核心魔法：使用 ColorMatrix 进行“暗部偏移”
             .applyingFilter("CIColorMatrix", parameters: [
-                "inputAVector": CIVector(x: 0, y: 0, z: 0, w: CGFloat(intensity))
+                // R, G, B 全部乘以 1 (保持原值)，但 Bias (偏移) 减去 0.3 ~ 0.5
+                // 这意味着：原来的中灰(0.5)会变成(0.1)甚至(0.0)的纯黑。
+                // 只有原来的极亮部(0.9+)才能勉强保留一点点灰度，其余全被压成黑色。
+                "inputBiasVector": CIVector(x: -0.3 - CGFloat(intensity * 0.2),
+                                            y: -0.3 - CGFloat(intensity * 0.2),
+                                            z: -0.3 - CGFloat(intensity * 0.2),
+                                            w: 0)
             ])
         
-        // 2. 铺满屏幕
-        let tiledGrain = grainWithIntensity
-            .applyingFilter("CIAffineTile")
-            .cropped(to: input.extent)
-
-        // 3. 混合
-        return input.applyingFilter("CIOverlayBlendMode", parameters: [
-            kCIInputImageKey: tiledGrain,
-            kCIInputBackgroundImageKey: input
+        // 4. 调整透明度
+        // 因为现在是纯黑颗粒，不需要太高透明度就能看得很清楚
+        let alpha = 0.2 + (intensity * 0.2)
+        let finalGrain = processedGrain.applyingFilter("CIColorMatrix", parameters: [
+            "inputAVector": CIVector(x: 0, y: 0, z: 0, w: CGFloat(alpha))
         ])
-    }
 
+        // 5. 混合模式改为 Overlay 或 HardLight
+        // 裁剪很重要，否则性能崩溃
+        let croppedGrain = finalGrain.cropped(to: input.extent)
+        
+        // 💡 如果你觉得 Overlay 还是不够黑，可以试试 "CILinearBurnBlendMode" (线性加深) 或 Stay with Overlay
+        // Overlay 在处理深色层时，会显著压暗背景，非常适合模拟银盐阻光效果。
+        let combined = CIFilter(name: "CIMultiplyBlendMode", parameters: [
+            kCIInputImageKey: croppedGrain,
+            kCIInputBackgroundImageKey: input
+        ])?.outputImage
+
+        return combined ?? input
+    }
+    
+    
+    
     private func setupInitialStyles() {
         self.availableSimulations = [
             FilmSimulation(name: "STD", type: .builtIn, filterName: nil, lutData: nil, dimension: 0, isFilm: false),
@@ -151,7 +185,7 @@ class FilmEngine: ObservableObject {
         }
         
         // 3. 💡 关键：根据 grainIntensity 应用噪点
-        if grainIntensity > 0 && styleName != "STD" {
+        if grainIntensity > 0 && styleName != "STD" && styleName != "MANAGE" {
             output = applyDynamicGrain(to: output, intensity: grainIntensity)
         }
         
