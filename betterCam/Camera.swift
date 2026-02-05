@@ -37,13 +37,20 @@ enum UIWidgets: Int, CaseIterable {
 
 class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVCapturePhotoCaptureDelegate {
     
-    let waveformOverlayWidth: Int = 128
-    let waveformOverlayHeight: Int = 64
+    enum ExposureMode { case waveform, histogram, off }
+    
+    let overlayWidth: Int = 128
+    let overlayHeight: Int = 64
     
     private var device: MTLDevice? = MTLCreateSystemDefaultDevice()
     private var commandQueue: MTLCommandQueue?
     private var pipelineState: MTLComputePipelineState?
     private var textureCache: CVMetalTextureCache?
+    
+    private var histogramComputePipeline: MTLComputePipelineState?
+    private let histogramRenderPipeline: MTLRenderPipelineState? = nil// 用于将数据画成条形图
+    private var histogramBuffer: MTLBuffer?
+    @Published var histogramImage: CGImage?
         
     @Published var waveformImage: CGImage? // 用于 UI 显示
     
@@ -87,7 +94,7 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     
     private var isConfiguring: Bool = false
     
-    @Published var showWaveform: Bool = false
+    @Published var exposureIndicatorMode: ExposureMode = .off
     @Published var isShowingMenu = false {
         didSet {
             sessionQueue.async { [weak self] in
@@ -523,9 +530,22 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         
-        if showWaveform {
-            self.processWaveform(from: pixelBuffer)
-        }
+        switch exposureIndicatorMode {
+            case .waveform:
+                self.processWaveform(from: pixelBuffer)
+                if histogramImage != nil { DispatchQueue.main.async { self.histogramImage = nil } }
+            case .histogram:
+                self.processHistogram(from: pixelBuffer)
+                if waveformImage != nil { DispatchQueue.main.async { self.waveformImage = nil } }
+            case .off:
+                // 模式关闭时，确保清空图片引用，释放内存
+                if waveformImage != nil || histogramImage != nil {
+                    DispatchQueue.main.async {
+                        self.waveformImage = nil
+                        self.histogramImage = nil
+                    }
+                }
+            }
         
         let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
         
@@ -938,37 +958,45 @@ enum DevicePerformanceTier {
 }
 
 extension Camera {
+    // MARK: - Metal Setup
     func setupMetal() {
         guard let device = device else { return }
         commandQueue = device.makeCommandQueue()
         let library = device.makeDefaultLibrary()
+        
+        // 初始化 Waveform 管线
         if let kernel = library?.makeFunction(name: "waveformKernel") {
             pipelineState = try? device.makeComputePipelineState(function: kernel)
         }
+        
+        // 初始化 Histogram 计算管线
+        if let histKernel = library?.makeFunction(name: "histogram_compute") {
+            histogramComputePipeline = try! device.makeComputePipelineState(function: histKernel)
+        }
+        
+        // 初始化直方图 Buffer (256个等级)
+        histogramBuffer = device.makeBuffer(length: 256 * MemoryLayout<UInt32>.stride, options: .storageModeShared)
     }
 
-        // 💡 在 captureOutput 中调用异步 Metal 计算
+    // MARK: - Waveform Process
     func processWaveform(from pixelBuffer: CVPixelBuffer) {
-        // 💡 只有开启显示且硬件就绪时才执行
-        guard showWaveform,
+        guard exposureIndicatorMode == .waveform,
               let pipeline = pipelineState,
               let queue = commandQueue,
               let cache = textureCache else { return }
         
-        // 1. 将 CVPixelBuffer 转换为输入纹理 (零拷贝)
         let width = CVPixelBufferGetWidth(pixelBuffer)
         let height = CVPixelBufferGetHeight(pixelBuffer)
         var cvTexture: CVMetalTexture?
         
         CVMetalTextureCacheCreateTextureFromImage(kCFAllocatorDefault, cache, pixelBuffer, nil, .bgra8Unorm, width, height, 0, &cvTexture)
-        
         guard let inputTexture = CVMetalTextureGetTexture(cvTexture!) else { return }
         
-        let desc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm, width: waveformOverlayWidth, height: waveformOverlayHeight, mipmapped: false)
+        // 输出纹理强制设为 128x64
+        let desc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm, width: overlayWidth, height: overlayHeight, mipmapped: false)
         desc.usage = [.shaderWrite, .shaderRead]
         guard let outputTexture = device?.makeTexture(descriptor: desc) else { return }
         
-        // 3. 配置并执行 Metal 指令
         guard let commandBuffer = queue.makeCommandBuffer(),
               let encoder = commandBuffer.makeComputeCommandEncoder() else { return }
         
@@ -976,7 +1004,6 @@ extension Camera {
         encoder.setTexture(inputTexture, index: 0)
         encoder.setTexture(outputTexture, index: 1)
         
-        // 计算 Threadgroups (根据输出纹理大小分配)
         let threadGroupSize = MTLSize(width: 16, height: 16, depth: 1)
         let threadGroups = MTLSize(width: (outputTexture.width + 15) / 16,
                                    height: (outputTexture.height + 15) / 16,
@@ -985,22 +1012,90 @@ extension Camera {
         encoder.dispatchThreadgroups(threadGroups, threadsPerThreadgroup: threadGroupSize)
         encoder.endEncoding()
         
-        // 4. 异步回调处理输出图像
         commandBuffer.addCompletedHandler { [weak self] _ in
             guard let self = self else { return }
-            
-            // 💡 关键：将计算结果转为 CGImage
-            // 注意：这里需要一个辅助函数来从 Texture 读取数据，为了性能，建议直接在 UI 层用 MTKView 显示纹理
             let cgImage = self.makeCGImage(from: outputTexture)
-            
             DispatchQueue.main.async {
                 self.waveformImage = cgImage
             }
         }
-        
         commandBuffer.commit()
     }
-    
+
+    // MARK: - Histogram Process
+    func processHistogram(from pixelBuffer: CVPixelBuffer) {
+        guard exposureIndicatorMode == .histogram,
+              let pipeline = histogramComputePipeline,
+              let queue = commandQueue,
+              let cache = textureCache,
+              let hBuffer = histogramBuffer else { return }
+
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        var cvTexture: CVMetalTexture?
+        CVMetalTextureCacheCreateTextureFromImage(kCFAllocatorDefault, cache, pixelBuffer, nil, .bgra8Unorm, width, height, 0, &cvTexture)
+        guard let inputTexture = CVMetalTextureGetTexture(cvTexture!) else { return }
+
+        // 重置统计数据
+        memset(hBuffer.contents(), 0, hBuffer.length)
+
+        guard let commandBuffer = queue.makeCommandBuffer(),
+              let encoder = commandBuffer.makeComputeCommandEncoder() else { return }
+
+        encoder.setComputePipelineState(pipeline)
+        encoder.setTexture(inputTexture, index: 0)
+        encoder.setBuffer(hBuffer, offset: 0, index: 0)
+
+        let w = pipeline.threadExecutionWidth
+        let h = pipeline.maxTotalThreadsPerThreadgroup / w
+        let threadsPerGroup = MTLSize(width: w, height: h, depth: 1)
+        let gridSize = MTLSize(width: (inputTexture.width + w - 1) / w,
+                               height: (inputTexture.height + h - 1) / h,
+                               depth: 1)
+
+        encoder.dispatchThreadgroups(gridSize, threadsPerThreadgroup: threadsPerGroup)
+        encoder.endEncoding()
+
+        commandBuffer.addCompletedHandler { [weak self] _ in
+            self?.renderHistogramUI()
+        }
+        commandBuffer.commit()
+    }
+
+    private func renderHistogramUI() {
+        guard let buffer = histogramBuffer else { return }
+        let ptr = buffer.contents().bindMemory(to: UInt32.self, capacity: 256)
+        
+        var maxCount: Float = 1.0
+        for i in 0..<256 { maxCount = max(maxCount, Float(ptr[i])) }
+
+        // 适配 128x64 规格
+        let size = CGSize(width: CGFloat(overlayWidth), height: CGFloat(overlayHeight))
+        let renderer = UIGraphicsImageRenderer(size: size)
+        
+        let image = renderer.image { context in
+            let ctx = context.cgContext
+            ctx.setFillColor(UIColor.white.cgColor)
+            
+            // 💡 优化：256 bins 对应 128 像素，每像素合并 2 bins
+            let binsPerPixel = 2
+            
+            for x in 0..<overlayWidth {
+                let binIndex = x * binsPerPixel
+                // 取两个相邻 bin 的平均值保证曲线平滑
+                let count = Float(ptr[binIndex] + ptr[binIndex + 1]) / 2.0
+                let barHeight = CGFloat(count / maxCount) * size.height
+                
+                ctx.fill(CGRect(x: CGFloat(x), y: size.height - barHeight, width: 1.0, height: barHeight))
+            }
+        }
+
+        DispatchQueue.main.async {
+            self.histogramImage = image.cgImage
+        }
+    }
+
+    // MARK: - Helpers
     func makeCGImage(from texture: MTLTexture) -> CGImage? {
         let width = texture.width
         let height = texture.height
@@ -1016,40 +1111,22 @@ extension Camera {
         return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: rowBytes, space: colorSpace, bitmapInfo: bitmapInfo, provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
     }
     
+    // MARK: - Performance & Resolution
     var performanceTier: DevicePerformanceTier {
         let id = UIDevice.current.modelIdentifier
-        
-        // 1. 提取型号中的主要数字部分（例如从 "iPhone16,1" 提取出 16）
-        // 💡 技巧：使用 Scanner 提取字符串中的第一个数字
         let scanner = Scanner(string: id)
         _ = scanner.scanUpToCharacters(from: .decimalDigits)
         let modelMajorVersion = scanner.scanInt() ?? 0
         
-        // 2. 基于数字范围进行“未来兼容”判定
-        // iPhone 15 系列的代号是 16
-        // iPhone 16 系列的代号是 17
-        
-        if modelMajorVersion >= 17 {
-            // 💡 判定为未来机型或现有的 Pro 系列（支持 ProRes / 4K）
-            return .pro
-        } else if modelMajorVersion >= 15 {
-            // 💡 iPhone 13 (14,x) 到 iPhone 15 (16,x) 之间
-            return .high
-        } else {
-            // 💡 更旧的设备，默认 1080P 以保证实时噪点渲染不掉帧
-            return .standard
-        }
+        if modelMajorVersion >= 17 { return .pro }
+        else if modelMajorVersion >= 15 { return .high }
+        else { return .standard }
     }
         
-        // 💡 根据型号初始化默认分辨率
     func setDefaultResolution() {
         switch performanceTier {
-        case .pro:
-            self.previewResolution = "HIGH"
-        case .high:
-            self.previewResolution = "HIGH"
-        case .standard:
-            self.previewResolution = "LOW"
+        case .pro, .high: self.previewResolution = "HIGH"
+        case .standard: self.previewResolution = "LOW"
         }
     }
 }

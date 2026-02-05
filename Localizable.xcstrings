@@ -113,6 +113,22 @@
         }
       }
     },
+    "Exposure Indicator" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "露出インジケーター"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "曝光指示器"
+          }
+        }
+      }
+    },
     "Got it" : {
       "localizations" : {
         "ja" : {
@@ -125,6 +141,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "明白了"
+          }
+        }
+      }
+    },
+    "Histogram" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ヒストグラム"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "直方图"
           }
         }
       }

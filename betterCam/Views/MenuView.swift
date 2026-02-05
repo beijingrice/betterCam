@@ -12,7 +12,8 @@ struct MenuView: View {
     // 💡 本地化变量
     private let LOW: String = String(NSLocalizedString("LOW", tableName: "Localizable_variable", comment: ""))
     private let HIGH: String = String(NSLocalizedString("HIGH", tableName: "Localizable_variable", comment: ""))
-    private let ON: String = String(NSLocalizedString("ON", tableName: "Localizable_variable", comment: ""))
+    private let WAVEFORM: String = String(NSLocalizedString("WAVEFORM", tableName: "Localizable_variable", comment: ""))
+    private let HISTOGRAM: String = String(NSLocalizedString("HISTOGRAM", tableName: "Localizable_variable", comment: ""))
     private let OFF: String = String(NSLocalizedString("OFF", tableName: "Localizable_variable", comment: ""))
     
     private let innerSpacing: CGFloat = 12
@@ -52,24 +53,35 @@ struct MenuView: View {
                 // 3. 波形图开关
                 // MenuView.swift 中的波形图部分
                 VStack(alignment: .leading, spacing: innerSpacing) {
-                    Text("Waveform")
+                    Text("Exposure Indicator")
                         .font(.caption.bold())
                         .foregroundColor(.gray)
                     
                     HStack(spacing: 0) {
-                        SegmentedButton(title: ON, isSelected: camera.showWaveform) {
+                        SegmentedButton(title: WAVEFORM, isSelected: camera.exposureIndicatorMode == .waveform) {
                             // 💡 物理反馈第一
                             haptic(.medium)
                             // 💡 异步开启，防止 GPU 突发负载引起主线程瞬间丢帧
                             DispatchQueue.main.async {
-                                camera.showWaveform = true
+                                camera.exposureIndicatorMode = .waveform
+                                camera.histogramImage = nil
                             }
                         }
-                        SegmentedButton(title: OFF, isSelected: !camera.showWaveform) {
+                        SegmentedButton(title: HISTOGRAM, isSelected: camera.exposureIndicatorMode == .histogram) {
+                            // 💡 物理反馈第一
+                            haptic(.medium)
+                            // 💡 异步开启，防止 GPU 突发负载引起主线程瞬间丢帧
+                            DispatchQueue.main.async {
+                                camera.exposureIndicatorMode = .histogram
+                                camera.waveformImage = nil
+                            }
+                        }
+                        SegmentedButton(title: OFF, isSelected: camera.exposureIndicatorMode == .off) {
                             haptic(.medium)
                             DispatchQueue.main.async {
-                                camera.showWaveform = false
+                                camera.exposureIndicatorMode = .off
                                 camera.waveformImage = nil // 立即清空显存
+                                camera.histogramImage = nil
                             }
                         }
                     }

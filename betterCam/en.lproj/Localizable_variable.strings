@@ -13,3 +13,5 @@
 "HIGH" = "HIGH";
 "ON" = "ON";
 "OFF" = "OFF";
+"WAVEFORM" = "WAVEFORM";
+"HISTOGRAM" = "HISTOGRAM";
