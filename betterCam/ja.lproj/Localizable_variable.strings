@@ -15,3 +15,5 @@
 "OFF" = "オフ";
 "WAVEFORM" = "ウェーブフォーム";
 "HISTOGRAM" = "ヒストグラム";
+"ENABLE" = "有効化";
+"DISABLE" = "無効化";

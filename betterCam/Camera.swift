@@ -39,6 +39,22 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     
     enum ExposureMode { case waveform, histogram, off }
     
+    enum ShutterSoundMode: String, CaseIterable {
+        case sony       = "shutter_eqed_gained"
+        case panasonic  = "s1m2_shutter_gained"
+    }
+    
+    private var oldShutterSoundMode: ShutterSoundMode = .sony
+    @Published var shutterSoundMode: ShutterSoundMode = .sony
+    
+    @Published var currentFocalLength: Int = 26
+    
+    @Published var enableFrontCamera: Bool = false {
+        didSet {
+            discoverCameras()
+        }
+    }
+    
     let overlayWidth: Int = 128
     let overlayHeight: Int = 64
     
@@ -121,6 +137,13 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
         CVMetalTextureCacheCreate(kCFAllocatorDefault, nil, device, nil, &textureCache)
     }
     
+    func changeShutterSound() {
+        if oldShutterSoundMode != shutterSoundMode {
+            setupShutterSound()
+            oldShutterSoundMode = shutterSoundMode
+        }
+    }
+    
     func callAllStartupFuncs() {
         setupMetal()
         setupTextureCache()
@@ -130,10 +153,10 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
         setupShutterSound()
         setupSession()
         setupLightMeter()
-        setupLightMeter()
         applyResolutionSettings()
         startDeviceMotion()
         syncAllLUTsToOptions()
+        getEquivalentFocalLength()
     }
     
     override init() {
@@ -167,6 +190,7 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     @Published var currentDeviceIndex: Int = 0 {
         didSet {
             setupLightMeter()
+            getEquivalentFocalLength()
         }
     }
     
@@ -300,6 +324,45 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     
     private let motionManager = CMMotionManager()
     private var deviceOrientation: AVCaptureVideoOrientation = .portrait
+    
+    func getEquivalentFocalLength() {
+        guard availableDevices.indices.contains(currentDeviceIndex) else { return }
+        let device = availableDevices[currentDeviceIndex]
+        
+        // 1. 获取原始计算值
+        let hFOV = device.activeFormat.videoFieldOfView
+        let radians = hFOV * Float.pi / 180.0
+        var calculatedEquivalent = 36.0 / (2.0 * tan(radians / 2.0))
+        
+        if device.deviceType == .builtInUltraWideCamera {
+            if Int(round(calculatedEquivalent)) == 14 {
+                calculatedEquivalent = 13
+            }
+        }
+        
+        // 2. 针对主摄进行硬校准
+        // iPhone 主摄在预览流下算出来常为 26.8-27.2，但在全像素下是 24 或 26
+        if device.deviceType == .builtInWideAngleCamera {
+            // 根据不同机型微调，通常主摄强制归位到 24 或 26 看起来最自然
+            if calculatedEquivalent > 23 && calculatedEquivalent < 28 {
+                // 这里可以根据你的 iPhone 15/16 Pro 经验，如果是 27 左右就显示 26
+                if calculatedEquivalent > 26.5 {
+                    calculatedEquivalent = 26
+                } else {
+                    calculatedEquivalent = 24
+                }
+            }
+        }
+        
+        // 3. 针对长焦 (Telephoto)
+        // 长焦常算出来是 78，系统显示 77；或算出来 122，系统显示 120
+        if device.deviceType == .builtInTelephotoCamera {
+            if calculatedEquivalent > 70 && calculatedEquivalent < 80 { calculatedEquivalent = 72 }
+            if calculatedEquivalent > 110 && calculatedEquivalent < 125 { calculatedEquivalent = 120 }
+        }
+        
+        self.currentFocalLength = Int(round(calculatedEquivalent))
+    }
 
         // 在 init 中启动监测
     func startDeviceMotion() {
@@ -369,15 +432,36 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     
     
     func discoverCameras() {
-        let discoverySession = AVCaptureDevice.DiscoverySession(deviceTypes: [.builtInWideAngleCamera, .builtInUltraWideCamera, .builtInTelephotoCamera], mediaType: .video, position: .back)
-        self.availableDevices = discoverySession.devices
+        // 将 position 设置为 .unspecified 可以搜索到所有方向的镜头
+        let discoverySession = AVCaptureDevice.DiscoverySession(
+            deviceTypes: [
+                .builtInWideAngleCamera,
+                .builtInUltraWideCamera,
+                .builtInTelephotoCamera,
+            ],
+            mediaType: .video,
+            position: .unspecified // 💡 修改点：允许前置和后置
+        )
+        
+        // 如果你只想在特定条件下显示前置，可以在这里过滤
+        if enableFrontCamera {
+            self.availableDevices = discoverySession.devices
+        } else {
+            // 仅保留后置镜头
+            self.availableDevices = discoverySession.devices.filter { $0.position == .back }
+        }
+        print("Available camera counts:", self.availableDevices.count)
     }
     
     func switchCamera(direction: Int) {
         guard availableDevices.count > 1 else { return }
         if currentDeviceIndex + direction >= 0 {
-            currentDeviceIndex = (currentDeviceIndex + 1) % availableDevices.count
+            print("In branch 1")
+            print(currentDeviceIndex, "->", (currentDeviceIndex + direction) % availableDevices.count)
+            currentDeviceIndex = (currentDeviceIndex + direction) % availableDevices.count
         } else {
+            print("In branch 2")
+            print(currentDeviceIndex, "->", availableDevices.count - 1)
             currentDeviceIndex = (availableDevices.count - 1)
         }
         let newDevice = availableDevices[currentDeviceIndex]
@@ -390,7 +474,6 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
             if session.canAddInput(newInput) {
                 session.addInput(newInput)
                 // 💡 关键：切换后立即更新光圈显示和 SS/ISO 可用范围
-                self.Aperture = String(format: "F%.1f", newDevice.lensAperture)
                 self.actualSSoptions = self.SSoptions.supportedSS(for: newDevice)
                 self.actualISOoptions = self.ISOoptions.supportedISO(for: newDevice).formattedISOoptions()
                 updateExposure()
@@ -453,7 +536,6 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
                 isAdjustingValue = false
             }
         }
-        print(isShowingMenu)
         
         // 2. 物理反馈：按下时震动一下
         // 这里使用 medium 震动，区别于拨轮旋转时的 light 震动
@@ -547,7 +629,22 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
                 }
             }
         
-        let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+        var ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+        
+
+        if let videoDevice = availableDevices.indices.contains(currentDeviceIndex) ? availableDevices[currentDeviceIndex] : nil,
+           videoDevice.position == .front {
+            
+            // 1. 先将图像移回 (0,0) 原点，防止 extent 偏移干扰翻转
+            let originTransform = CGAffineTransform(translationX: -ciImage.extent.origin.x, y: -ciImage.extent.origin.y)
+            var correctedImage = ciImage.transformed(by: originTransform)
+            
+            // 2. 💡 执行镜像：翻转 X 轴并平移回显示区域
+            let mirrorTransform = CGAffineTransform(scaleX: 1, y: -1)
+                .translatedBy(x: -correctedImage.extent.width, y: 0)
+            
+            ciImage = correctedImage.transformed(by: mirrorTransform)
+        }
         
         // 💡 传入实时强度参数
         let finalImage = (imageQuality == "DNG") ? ciImage :
@@ -619,8 +716,32 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     }
     
     private func setupShutterSound() {
-        guard let soundURL = Bundle.main.url(forResource: "shutter_eqed_gained", withExtension: "aac") else { return }
-        AudioServicesCreateSystemSoundID(soundURL as CFURL, &shutterSoundID)
+        // 1. 彻底销毁旧 ID，防止资源占用
+        if shutterSoundID != 0 {
+            AudioServicesDisposeSystemSoundID(shutterSoundID)
+            shutterSoundID = 0
+        }
+        
+        // 2. 这里的 shutterSoundMode.rawValue 应该对应你工程里的文件名
+        let fileName = shutterSoundMode.rawValue
+        print(fileName)
+        
+        // 💡 调试打印：如果你在切换到 2 时静音，控制台会显示路径是否为空
+        guard let soundURL = Bundle.main.url(forResource: fileName, withExtension: "aac") else {
+            print("❌ 错误：找不到音频文件: \(fileName).aac")
+            return
+        }
+        
+        // 3. 重新创建 SoundID
+        var soundID: SystemSoundID = 0
+        let status = AudioServicesCreateSystemSoundID(soundURL as CFURL, &soundID)
+        
+        if status == kAudioServicesNoError {
+            self.shutterSoundID = soundID
+            print("✅ 成功加载快门音: \(fileName)")
+        } else {
+            print("❌ 无法创建 SystemSoundID，状态码: \(status)")
+        }
     }
     
     func playShutterSound() {
@@ -628,7 +749,7 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
             AudioServicesPlaySystemSound(shutterSoundID)
         }
     }
-    
+     
     private func adjustValue(direction: Int) {
         switch activeIndex {
         case UIWidgets.AFMode.rawValue:
@@ -720,7 +841,7 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
                 
                 // 回到主线程更新 @Published 变量以刷新 UI
                 DispatchQueue.main.async {
-                    self.Aperture = "F" + String(finalAperture)
+                    self.Aperture = String(format: "F%.1f", finalAperture)
                 }
                 
                 device.unlockForConfiguration()
@@ -747,7 +868,7 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
         
         if !photo.isRawPhoto {
             guard let imageData = photo.fileDataRepresentation(),
-                  let ciImage = CIImage(data: imageData) else { return }
+                  var ciImage = CIImage(data: imageData) else { return }
             
             // 1. 应用滤镜处理
             let filteredImage = FilmEngine.shared.process(ciImage, styleName: style, lutIntensity: lutIntensity, grainIntensity: grainIntensity)
@@ -804,6 +925,15 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
         // 💡 核心修复：EXIF信息校正。强制快门优先，防止算法重置快门时长
         photoSettings.photoQualityPrioritization = .speed
         photoSettings.isShutterSoundSuppressionEnabled = true
+        
+        if let photoConnection = photoOutput.connection(with: .video) {
+            if let videoDevice = availableDevices.indices.contains(currentDeviceIndex) ? availableDevices[currentDeviceIndex] : nil,
+               videoDevice.position == .front {
+                photoConnection.isVideoMirrored = true // 开启硬件级镜像
+            } else {
+                photoConnection.isVideoMirrored = false
+            }
+        }
         
         photoOutput.capturePhoto(with: photoSettings, delegate: self)
         playShutterSound()

@@ -15,6 +15,8 @@ struct MenuView: View {
     private let WAVEFORM: String = String(NSLocalizedString("WAVEFORM", tableName: "Localizable_variable", comment: ""))
     private let HISTOGRAM: String = String(NSLocalizedString("HISTOGRAM", tableName: "Localizable_variable", comment: ""))
     private let OFF: String = String(NSLocalizedString("OFF", tableName: "Localizable_variable", comment: ""))
+    private let ENABLE: String = String(NSLocalizedString("ENABLE", tableName: "Localizable_variable", comment: ""))
+    private let DISABLE: String = String(NSLocalizedString("DISABLE", tableName: "Localizable_variable", comment: ""))
     
     private let innerSpacing: CGFloat = 12
     private let roundedCornerRadius: CGFloat = 8
@@ -25,88 +27,130 @@ struct MenuView: View {
             Color.black.opacity(0.9)
                 .ignoresSafeArea()
             
-            VStack(spacing: 20) {
-                // 1. 顶部标题
-                Text("Settings")
-                    .font(.system(size: 16, weight: .bold, design: .monospaced))
-                    .tracking(2)
-                    .foregroundColor(.white)
-                
-                // 2. 预览分辨率选择
-                VStack(alignment: .leading, spacing: innerSpacing) {
-                    Text("Preview Resolution")
-                        .font(.caption.bold())
-                        .foregroundColor(.gray)
-                    
-                    HStack(spacing: 0) {
-                        SegmentedButton(title: LOW, isSelected: camera.previewResolution == "LOW") {
-                            updateResolution("LOW")
-                        }
-                        SegmentedButton(title: HIGH, isSelected: camera.previewResolution == "HIGH") {
-                            updateResolution("HIGH")
-                        }
-                    }
-                    .background(Color.white.opacity(0.1))
-                    .cornerRadius(roundedCornerRadius)
-                }
-                
-                // 3. 波形图开关
-                // MenuView.swift 中的波形图部分
-                VStack(alignment: .leading, spacing: innerSpacing) {
-                    Text("Exposure Indicator")
-                        .font(.caption.bold())
-                        .foregroundColor(.gray)
-                    
-                    HStack(spacing: 0) {
-                        SegmentedButton(title: WAVEFORM, isSelected: camera.exposureIndicatorMode == .waveform) {
-                            // 💡 物理反馈第一
-                            haptic(.medium)
-                            // 💡 异步开启，防止 GPU 突发负载引起主线程瞬间丢帧
-                            DispatchQueue.main.async {
-                                camera.exposureIndicatorMode = .waveform
-                                camera.histogramImage = nil
-                            }
-                        }
-                        SegmentedButton(title: HISTOGRAM, isSelected: camera.exposureIndicatorMode == .histogram) {
-                            // 💡 物理反馈第一
-                            haptic(.medium)
-                            // 💡 异步开启，防止 GPU 突发负载引起主线程瞬间丢帧
-                            DispatchQueue.main.async {
-                                camera.exposureIndicatorMode = .histogram
-                                camera.waveformImage = nil
-                            }
-                        }
-                        SegmentedButton(title: OFF, isSelected: camera.exposureIndicatorMode == .off) {
-                            haptic(.medium)
-                            DispatchQueue.main.async {
-                                camera.exposureIndicatorMode = .off
-                                camera.waveformImage = nil // 立即清空显存
-                                camera.histogramImage = nil
-                            }
-                        }
-                    }
-                    .background(Color.white.opacity(0.1))
-                    .cornerRadius(roundedCornerRadius)
-                }
-                
-                Spacer()
-                
-                // 4. 关键修正：关闭按钮
-                // 采用最高的优先级，物理反馈优先于状态变更
-                Button(action: {
-                    dismissMenu()
-                }) {
-                    Text("Close")
-                        .font(.system(size: 14, weight: .bold))
-                        .frame(height: 44) // 增加点击热区
-                        .frame(maxWidth: .infinity)
-                        .background(Color.white.opacity(0.15))
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(spacing: 20) {
+                    // 1. 顶部标题
+                    Text("Settings")
+                        .font(.system(size: 16, weight: .bold, design: .monospaced))
+                        .tracking(2)
                         .foregroundColor(.white)
-                        .cornerRadius(10)
+                    
+                    // 2. 预览分辨率选择
+                    VStack(alignment: .leading, spacing: innerSpacing) {
+                        Text("Preview Resolution")
+                            .font(.caption.bold())
+                            .foregroundColor(.gray)
+                        
+                        HStack(spacing: 0) {
+                            SegmentedButton(title: LOW, isSelected: camera.previewResolution == "LOW") {
+                                updateResolution("LOW")
+                            }
+                            SegmentedButton(title: HIGH, isSelected: camera.previewResolution == "HIGH") {
+                                updateResolution("HIGH")
+                            }
+                        }
+                        .background(Color.white.opacity(0.1))
+                        .cornerRadius(roundedCornerRadius)
+                    }
+                    
+                    // 3. 波形图开关
+                    // MenuView.swift 中的波形图部分
+                    VStack(alignment: .leading, spacing: innerSpacing) {
+                        Text("Exposure Indicator")
+                            .font(.caption.bold())
+                            .foregroundColor(.gray)
+                        
+                        HStack(spacing: 0) {
+                            SegmentedButton(title: WAVEFORM, isSelected: camera.exposureIndicatorMode == .waveform) {
+                                // 💡 物理反馈第一
+                                haptic(.medium)
+                                // 💡 异步开启，防止 GPU 突发负载引起主线程瞬间丢帧
+                                DispatchQueue.main.async {
+                                    camera.exposureIndicatorMode = .waveform
+                                    camera.histogramImage = nil
+                                }
+                            }
+                            SegmentedButton(title: HISTOGRAM, isSelected: camera.exposureIndicatorMode == .histogram) {
+                                // 💡 物理反馈第一
+                                haptic(.medium)
+                                // 💡 异步开启，防止 GPU 突发负载引起主线程瞬间丢帧
+                                DispatchQueue.main.async {
+                                    camera.exposureIndicatorMode = .histogram
+                                    camera.waveformImage = nil
+                                }
+                            }
+                            SegmentedButton(title: OFF, isSelected: camera.exposureIndicatorMode == .off) {
+                                haptic(.medium)
+                                DispatchQueue.main.async {
+                                    camera.exposureIndicatorMode = .off
+                                    camera.waveformImage = nil // 立即清空显存
+                                    camera.histogramImage = nil
+                                }
+                            }
+                        }
+                        .background(Color.white.opacity(0.1))
+                        .cornerRadius(roundedCornerRadius)
+                    }
+                    
+                    VStack (alignment: .leading, spacing: innerSpacing) { // Enable front camera
+                        Text("Front Camera")
+                            .font(.caption.bold())
+                            .foregroundColor(.gray)
+                        HStack(spacing: 0) {
+                            SegmentedButton(title: ENABLE, isSelected: camera.enableFrontCamera) {
+                                haptic(.medium)
+                                DispatchQueue.main.async {
+                                    camera.enableFrontCamera = true
+                                }
+                            }
+                            SegmentedButton(title: DISABLE, isSelected: !camera.enableFrontCamera) {
+                                haptic(.medium)
+                                DispatchQueue.main.async {
+                                    camera.enableFrontCamera = false
+                                }
+                            }
+                        }
+                        .background(Color.white.opacity(0.1))
+                        .cornerRadius(roundedCornerRadius)
+                    }
+                    
+                    VStack(alignment: .leading, spacing: innerSpacing) {
+                        Text("Shutter Sound")
+                            .font(.caption.bold()).foregroundColor(.gray)
+                        HStack(spacing: 0) {
+                            SegmentedButton(title: "1", isSelected: camera.shutterSoundMode == .sony) {
+                                haptic(.medium)
+                                camera.shutterSoundMode = .sony
+                                camera.changeShutterSound()
+                            }
+                            SegmentedButton(title: "2", isSelected: camera.shutterSoundMode == .panasonic) {
+                                haptic(.medium)
+                                camera.shutterSoundMode = .panasonic
+                                camera.changeShutterSound()
+                            }
+                        }
+                        .background(Color.white.opacity(0.1)).cornerRadius(roundedCornerRadius)
+                    }
+                    
+                    Spacer()
+                    
+                    // 4. 关键修正：关闭按钮
+                    // 采用最高的优先级，物理反馈优先于状态变更
+                    Button(action: {
+                        dismissMenu()
+                    }) {
+                        Text("Close")
+                            .font(.system(size: 14, weight: .bold))
+                            .frame(height: 44) // 增加点击热区
+                            .frame(maxWidth: .infinity)
+                            .background(Color.white.opacity(0.15))
+                            .foregroundColor(.white)
+                            .cornerRadius(10)
+                    }
+                    .padding(.bottom, 20)
                 }
-                .padding(.bottom, 20)
+                .padding(30)
             }
-            .padding(30)
         }
     }
     

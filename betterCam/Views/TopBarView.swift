@@ -14,11 +14,9 @@ struct TopBarView: View {
             ParameterItem(title: camera.imageQuality, index: UIWidgets.imageQuality.rawValue)
             Spacer()
             ParameterItem(
-                            title: camera.availableDevices.isEmpty ? "1x" :
-                                   (camera.currentDeviceIndex == 0 ? "1x" :
-                                    camera.currentDeviceIndex == 1 ? "0.5x" : "3x"),
-                            index: UIWidgets.lensSwitch.rawValue
-                        )
+                title: String(camera.currentFocalLength) + "mm",
+                index: UIWidgets.lensSwitch.rawValue
+            )
             Spacer()
             ParameterItem(title: camera.AFMode, index: UIWidgets.AFMode.rawValue)
             Spacer()

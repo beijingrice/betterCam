@@ -15,3 +15,5 @@
 "OFF" = "关";
 "WAVEFORM" = "波形图";
 "HISTOGRAM" = "直方图";
+"ENABLE" = "启用";
+"DISABLE" = "禁用";
