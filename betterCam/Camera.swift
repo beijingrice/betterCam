@@ -37,6 +37,8 @@ enum UIWidgets: Int, CaseIterable {
 
 class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVCapturePhotoCaptureDelegate {
     
+    private var isRestoring: Bool = false
+    
     enum ExposureMode { case waveform, histogram, off }
     
     enum ShutterSoundMode: String, CaseIterable {
@@ -45,7 +47,7 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     }
     
     private var oldShutterSoundMode: ShutterSoundMode = .sony
-    @Published var shutterSoundMode: ShutterSoundMode = .sony
+    @AppStorage("shutterSoundMode") var shutterSoundMode: ShutterSoundMode = .sony
     
     @Published var currentFocalLength: Int = 26
     
@@ -141,6 +143,13 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
         if oldShutterSoundMode != shutterSoundMode {
             setupShutterSound()
             oldShutterSoundMode = shutterSoundMode
+            UserDefaults.standard.set(shutterSoundMode.rawValue, forKey: "shutterSoundMode")
+        }
+    }
+    
+    func loadShutterSoundFromStorage() {
+        if let savedShutterSoundMode = UserDefaults.standard.string(forKey: "shutterSoundMode") {
+            shutterSoundMode = ShutterSoundMode(rawValue: savedShutterSoundMode) ?? .sony
         }
     }
     
@@ -152,6 +161,8 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
         discoverCameras()
         setupShutterSound()
         setupSession()
+        loadShutterSoundFromStorage()
+        loadParameterFromStorage()
         setupLightMeter()
         applyResolutionSettings()
         startDeviceMotion()
@@ -233,8 +244,8 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
         
     }
     
-    private var lastSS: String = ""
-    private var lastISO: String = ""
+    private var lastSS: String = "1/200"
+    private var lastISO: String = "ISO 100"
     private func autoAmode(nowBeingControlled: String) {
         if nowBeingControlled == "SS" {
             if SS == "AUTO" && ISO != "AUTO" {
@@ -258,19 +269,60 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
             }
         }
     }
+    
+    @AppStorage("enablePermanentParameterStorage") var enablePermanentParameterStorage: Bool = false
+    @AppStorage("perferAUTO") var perferAUTO: Bool = false
+    
+    func updateParameterToStorage() {
+        print("PermanentParameterStorageEnabled?", enablePermanentParameterStorage)
+        if enablePermanentParameterStorage {
+            print("Wrote parameter to disk!")
+            UserDefaults.standard.set(SS, forKey: "SS")
+            UserDefaults.standard.set(ISO, forKey: "ISO")
+            if let savedISO = UserDefaults.standard.string(forKey: "ISO") {
+                print("Saved ISO:", savedISO) // FOR DEBUG
+            }
+        }
+    }
+    
+    func loadParameterFromStorage() {
+        isRestoring = true
+        if UserDefaults.standard.bool(forKey: "perferAUTO") {
+            self.SS = "AUTO"
+            self.ISO = "AUTO"
+            isRestoring = false
+            return
+        }
+        if UserDefaults.standard.bool(forKey: "enablePermanentParameterStorage") {
+            if let savedSS = UserDefaults.standard.string(forKey: "SS") {
+                self.SS = savedSS
+            }
+            if let savedISO = UserDefaults.standard.string(forKey: "ISO") {
+                self.ISO = savedISO
+            }
+            print("✅ 参数已从磁盘恢复: SS=\(SS), ISO=\(ISO)")
+        }
+        isRestoring = false
+    }
+    
     // TODO: Add a permanent storage for parameters
     @Published var SS: String = "1/200" {
         didSet {
+            guard !isRestoring else { return }
             autoAmode(nowBeingControlled: "SS")
             updateExposure()
+            updateParameterToStorage()
     }
     }
     @Published var Aperture: String = "F1.8"
     @Published var EV: String = "0.0" { didSet { updateExposure() } }
     @Published var ISO: String = "ISO 100" {
         didSet {
+            print("ISO changed!")
+            guard !isRestoring else { return }
             autoAmode(nowBeingControlled: "ISO")
             updateExposure()
+            updateParameterToStorage()
         }
     }
     // var styleOptions: [String] = ["STD", "RICH", "NOSTALGIC", "BW", "MANAGE"]
@@ -278,7 +330,7 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     var styleOptions: [String] = []
     var AFModeOptions: [String] = ["AF-C", "AF-S"]
     @Published var style: String = "STD"
-    @Published var imageQuality: String = "DNG+J"
+    @Published var imageQuality: String = "JPEG"
     @Published var aspectRatio: String = "4:3"
     @Published var AFMode: String = "AF-C" {
         didSet {

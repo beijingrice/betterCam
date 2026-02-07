@@ -132,6 +132,38 @@ struct MenuView: View {
                         .background(Color.white.opacity(0.1)).cornerRadius(roundedCornerRadius)
                     }
                     
+                    VStack(alignment: .leading, spacing: innerSpacing) {
+                        Text("Save shutter speed and ISO from last session")
+                            .font(.caption.bold()).foregroundColor(.gray)
+                        HStack(spacing: 0) {
+                            SegmentedButton(title: ENABLE, isSelected: camera.enablePermanentParameterStorage, isDisabled: camera.perferAUTO) {
+                                haptic(.medium)
+                                camera.enablePermanentParameterStorage = true
+                                camera.updateParameterToStorage()
+                            }
+                            SegmentedButton(title: DISABLE, isSelected: !camera.enablePermanentParameterStorage, isDisabled: camera.perferAUTO) {
+                                haptic(.medium)
+                                camera.enablePermanentParameterStorage = false
+                            }
+                        }
+                        .background(Color.white.opacity(0.1)).cornerRadius(roundedCornerRadius)
+                    }
+                    
+                    VStack(alignment: .leading, spacing: innerSpacing) {
+                        Text("Perfer AUTO mode when launched")
+                            .font(.caption.bold()).foregroundColor(.gray)
+                        HStack(spacing: 0) {
+                            SegmentedButton(title: ENABLE, isSelected: camera.perferAUTO) {
+                                camera.perferAUTO = true
+                                camera.enablePermanentParameterStorage = false
+                            }
+                            SegmentedButton(title: DISABLE, isSelected: !camera.perferAUTO) {
+                                camera.perferAUTO = false
+                            }
+                        }
+                        .background(Color.white.opacity(0.1)).cornerRadius(roundedCornerRadius)
+                    }
+                    
                     Spacer()
                     
                     // 4. 关键修正：关闭按钮
@@ -191,17 +223,41 @@ struct SegmentedButton: View {
     let title: String
     let isSelected: Bool
     let action: () -> Void
+    let isDisabled: Bool
+    
+    init(title: String, isSelected: Bool, action: @escaping () -> Void, isDisabled: Bool = false) {
+        self.title = title
+        self.isSelected = isSelected
+        self.action = action
+        self.isDisabled = isDisabled
+    }
+    
+    func actualAction() {
+        if !isDisabled {
+            action()
+        }
+    }
     
     var body: some View {
-        Button(action: action) {
-            Text(title)
-                .font(.system(size: 14, weight: .bold, design: .monospaced))
-                .frame(maxWidth: .infinity)
-                .frame(height: 40)
-                .background(isSelected ? Color.white : Color.clear)
-                .foregroundColor(isSelected ? Color.black : Color.white)
+        Button(action: actualAction) {
+            if !isDisabled {
+                Text(title)
+                    .font(.system(size: 14, weight: .bold, design: .monospaced))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 40)
+                    .background(isSelected ? Color.white : Color.clear)
+                    .foregroundColor(isSelected ? Color.black : Color.white)
+            } else {
+                Text(title)
+                    .font(.system(size: 14, weight: .bold, design: .monospaced))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 40)
+                    .background(Color.black.opacity(0.4))
+                    .foregroundColor(Color.white.opacity(0.6))
+            }
         }
         // 💡 禁用按钮自带的简单动画，避免与 camera 里的逻辑冲突
         .animation(.none, value: isSelected)
+        .disabled(isDisabled)
     }
 }
