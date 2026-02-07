@@ -258,6 +258,7 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
             }
         }
     }
+    // TODO: Add a permanent storage for parameters
     @Published var SS: String = "1/200" {
         didSet {
             autoAmode(nowBeingControlled: "SS")

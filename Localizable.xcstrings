@@ -257,22 +257,6 @@
         }
       }
     },
-    "Launch BetterCam to take photos." : {
-      "localizations" : {
-        "ja" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "BetterCamを開いて、写真を撮りましょう"
-          }
-        },
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "启动BetterCam以拍摄照片"
-          }
-        }
-      }
-    },
     "Look for STYLE parameter," : {
       "localizations" : {
         "ja" : {
