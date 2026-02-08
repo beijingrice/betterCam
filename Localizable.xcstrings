@@ -1,6 +1,38 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "Buy me a cup of coffee" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "コーヒーを奢る"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "赏开发者一杯咖啡"
+          }
+        }
+      }
+    },
+    "Buy me a cup of coffee!" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開発者にコーヒーを奢る！"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "给我买杯咖啡吧！"
+          }
+        }
+      }
+    },
     "Cancel" : {
       "localizations" : {
         "ja" : {
@@ -321,6 +353,22 @@
         }
       }
     },
+    "Oh, yeah! You have already donated me! Thank you!" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ありがとうございます！チップをいただきました。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "哦！你已经打赏过我了！谢谢你！"
+          }
+        }
+      }
+    },
     "OK" : {
       "localizations" : {
         "ja" : {
@@ -336,9 +384,6 @@
           }
         }
       }
-    },
-    "Perfer AUTO mode when launched" : {
-
     },
     "Permission Needed" : {
       "localizations" : {
@@ -384,6 +429,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "请为此LUT键入新名称"
+          }
+        }
+      }
+    },
+    "Prefer AUTO mode when launched" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "起動時にAUTOモードを優先"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "启动时默认选择AUTO模式"
           }
         }
       }
@@ -484,6 +545,22 @@
         }
       }
     },
+    "Restore Purchases" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "購入済み項目を復元"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "恢复购买"
+          }
+        }
+      }
+    },
     "Rotate the dial to switch items" : {
       "localizations" : {
         "ja" : {
@@ -501,7 +578,20 @@
       }
     },
     "Save shutter speed and ISO from last session" : {
-
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "前回のシャッタースピードとISOを保持"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保存上次会话的快门速度和ISO"
+          }
+        }
+      }
     },
     "Settings" : {
       "localizations" : {
@@ -595,6 +685,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "上下滑动以更改噪点强度"
+          }
+        }
+      }
+    },
+    "Thank you!" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ありがとうございます！"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "谢谢你！"
           }
         }
       }

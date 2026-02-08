@@ -46,6 +46,8 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
         case panasonic  = "s1m2_shutter_gained"
     }
     
+    @AppStorage("doneTheTip") var doneTheTip: Bool = false
+    
     private var oldShutterSoundMode: ShutterSoundMode = .sony
     @AppStorage("shutterSoundMode") var shutterSoundMode: ShutterSoundMode = .sony
     
