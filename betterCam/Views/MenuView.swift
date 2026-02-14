@@ -135,6 +135,104 @@ struct MenuView: View {
         }
     }
     
+    private var saveSSandISOsection: some View {
+        VStack(alignment: .leading, spacing: innerSpacing) {
+            Text("Save shutter speed and ISO from last session")
+                .font(.caption.bold()).foregroundColor(.gray)
+            HStack(spacing: 0) {
+                SegmentedButton(title: ENABLE, isSelected: camera.enablePermanentParameterStorage, isDisabled: camera.perferAUTO) {
+                    haptic(.medium)
+                    camera.enablePermanentParameterStorage = true
+                    camera.updateParameterToStorage()
+                }
+                SegmentedButton(title: DISABLE, isSelected: !camera.enablePermanentParameterStorage, isDisabled: camera.perferAUTO) {
+                    haptic(.medium)
+                    camera.enablePermanentParameterStorage = false
+                }
+            }
+            .background(Color.white.opacity(0.1)).cornerRadius(roundedCornerRadius)
+        }
+    }
+    
+    private var preferAUTOsection: some View {
+        VStack(alignment: .leading, spacing: innerSpacing) {
+            Text("Prefer AUTO mode when launched")
+                .font(.caption.bold()).foregroundColor(.gray)
+            HStack(spacing: 0) {
+                SegmentedButton(title: ENABLE, isSelected: camera.perferAUTO) {
+                    camera.perferAUTO = true
+                    camera.enablePermanentParameterStorage = false
+                }
+                SegmentedButton(title: DISABLE, isSelected: !camera.perferAUTO) {
+                    camera.perferAUTO = false
+                }
+            }
+            .background(Color.white.opacity(0.1)).cornerRadius(roundedCornerRadius)
+        }
+    }
+    
+    private var moneyONEGAIsection: some View {
+        VStack(alignment: .leading, spacing: innerSpacing) {
+            Text("Buy me a cup of coffee")
+                .font(.caption.bold()).foregroundColor(.gray)
+            Button(action: {
+                haptic(.light)
+                print("Tapped purchase button!")
+                Task {
+                    let success = await storeManager.purchase()
+                    print("Created the task!")
+                    if success {
+                        haptic(.heavy)
+                        showThanksAlert = true
+                        camera.doneTheTip = true
+                        print("Purchase done!")
+                    }
+                }
+            }) {
+                HStack {
+                    Image(systemName: "cup.and.saucer.fill")
+                    Text("Buy me a cup of coffee!")
+                        .font(.system(size: 14, weight: .bold, design: .monospaced))
+                    Spacer()
+                }
+                .padding()
+                .background(Color.yellow.opacity(0.15))
+                .foregroundColor(.yellow)
+                .cornerRadius(10)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Color.yellow.opacity(0.4), lineWidth: 1)
+                )
+            }
+            Button(action: {
+                haptic(.light)
+                Task {
+                    let success = await storeManager.restorePurchases()
+                    if success {
+                        haptic(.medium)
+                        showRestoredMsg = true
+                        camera.doneTheTip = true
+                    }
+                }
+            }) {
+                Text("Restore Purchases")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.gray)
+                    .padding(.top, 4)
+            }
+        }
+    }
+    
+    private var cancelButton: some View {
+        Button(action: {
+            dismissMenu()
+        }) {
+            Image(systemName: "xmark")
+                .font(.system(size: 24))
+                .foregroundColor(Color.white)
+        }
+    }
+    
     var body: some View {
         ZStack {
             // 半透明背景，点击此处也可以增加关闭逻辑
@@ -143,8 +241,16 @@ struct MenuView: View {
             
             ScrollView(.vertical, showsIndicators: false) {
                 VStack(spacing: 20) {
+                    
                     // 1. 顶部标题
-                    headerSection
+                    ZStack {
+                        HStack {
+                            cancelButton
+                                .padding(10)
+                            Spacer()
+                        }
+                        headerSection
+                    }
                     
                     // 2. 预览分辨率选择
                     previewResSection
@@ -157,106 +263,19 @@ struct MenuView: View {
                     
                     shutterSoundSection
                     
-                    VStack(alignment: .leading, spacing: innerSpacing) {
-                        Text("Save shutter speed and ISO from last session")
-                            .font(.caption.bold()).foregroundColor(.gray)
-                        HStack(spacing: 0) {
-                            SegmentedButton(title: ENABLE, isSelected: camera.enablePermanentParameterStorage, isDisabled: camera.perferAUTO) {
-                                haptic(.medium)
-                                camera.enablePermanentParameterStorage = true
-                                camera.updateParameterToStorage()
-                            }
-                            SegmentedButton(title: DISABLE, isSelected: !camera.enablePermanentParameterStorage, isDisabled: camera.perferAUTO) {
-                                haptic(.medium)
-                                camera.enablePermanentParameterStorage = false
-                            }
-                        }
-                        .background(Color.white.opacity(0.1)).cornerRadius(roundedCornerRadius)
-                    }
+                    saveSSandISOsection
                     
-                    VStack(alignment: .leading, spacing: innerSpacing) {
-                        Text("Prefer AUTO mode when launched")
-                            .font(.caption.bold()).foregroundColor(.gray)
-                        HStack(spacing: 0) {
-                            SegmentedButton(title: ENABLE, isSelected: camera.perferAUTO) {
-                                camera.perferAUTO = true
-                                camera.enablePermanentParameterStorage = false
-                            }
-                            SegmentedButton(title: DISABLE, isSelected: !camera.perferAUTO) {
-                                camera.perferAUTO = false
-                            }
-                        }
-                        .background(Color.white.opacity(0.1)).cornerRadius(roundedCornerRadius)
-                    }
+                    preferAUTOsection
                     
                     if !camera.doneTheTip {
-                        VStack(alignment: .leading, spacing: innerSpacing) {
-                            Text("Buy me a cup of coffee")
-                                .font(.caption.bold()).foregroundColor(.gray)
-                            Button(action: {
-                                haptic(.light)
-                                print("Tapped purchase button!")
-                                Task {
-                                    let success = await storeManager.purchase()
-                                    print("Created the task!")
-                                    if success {
-                                        haptic(.heavy)
-                                        showThanksAlert = true
-                                        camera.doneTheTip = true
-                                        print("Purchase done!")
-                                    }
-                                }
-                            }) {
-                                HStack {
-                                    Image(systemName: "cup.and.saucer.fill")
-                                    Text("Buy me a cup of coffee!")
-                                        .font(.system(size: 14, weight: .bold, design: .monospaced))
-                                    Spacer()
-                                }
-                                .padding()
-                                .background(Color.yellow.opacity(0.15))
-                                .foregroundColor(.yellow)
-                                .cornerRadius(10)
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 10)
-                                        .stroke(Color.yellow.opacity(0.4), lineWidth: 1)
-                                )
-                            }
-                            Button(action: {
-                                haptic(.light)
-                                Task {
-                                    let success = await storeManager.restorePurchases()
-                                    if success {
-                                        haptic(.medium)
-                                        showRestoredMsg = true
-                                        camera.doneTheTip = true
-                                    }
-                                }
-                            }) {
-                                Text("Restore Purchases")
-                                    .font(.system(size: 11, design: .monospaced))
-                                    .foregroundColor(.gray)
-                                    .padding(.top, 4)
-                            }
-                        }
+                        moneyONEGAIsection // かわいいからお金お願いします〜
                     }
                     
                     Spacer()
                     
                     // 4. 关键修正：关闭按钮
                     // 采用最高的优先级，物理反馈优先于状态变更
-                    Button(action: {
-                        dismissMenu()
-                    }) {
-                        Text("Close")
-                            .font(.system(size: 14, weight: .bold))
-                            .frame(height: 44) // 增加点击热区
-                            .frame(maxWidth: .infinity)
-                            .background(Color.white.opacity(0.15))
-                            .foregroundColor(.white)
-                            .cornerRadius(10)
-                    }
-                    .padding(.bottom, 20)
+                    
                 }
                 .padding(30)
             }
@@ -347,4 +366,8 @@ struct SegmentedButton: View {
         .animation(.none, value: isSelected)
         .disabled(isDisabled)
     }
+}
+
+#Preview {
+    MenuView(camera: Camera())
 }

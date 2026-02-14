@@ -60,6 +60,14 @@ extension View {
                         ), lineWidth: depth)
                         .blur(radius: 1)
                     
+                    RoundedRectangle(cornerRadius: cornerRadius)
+                        .stroke(LinearGradient(
+                            colors: [.black.opacity(0.8), .clear],
+                            startPoint: .topTrailing,
+                            endPoint: .center
+                        ), lineWidth: 1)
+                        .blur(radius: 1)
+                    
                     // 2. 右侧和下侧：微弱亮边（模拟切削面反光）
                     RoundedRectangle(cornerRadius: cornerRadius)
                         .stroke(LinearGradient(
