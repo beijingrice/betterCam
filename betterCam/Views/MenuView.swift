@@ -5,18 +5,233 @@
 //  Created by Rice on 2026/2/4.
 //
 import SwiftUI
+import StoreKit
 
 struct MenuView: View {
     @ObservedObject var camera: Camera
+    @StateObject private var storeManager = StoreManager()
+    @State private var showThanksAlert: Bool = false
+    @State private var showRestoredMsg: Bool = false
     
     // 💡 本地化变量
     private let LOW: String = String(NSLocalizedString("LOW", tableName: "Localizable_variable", comment: ""))
     private let HIGH: String = String(NSLocalizedString("HIGH", tableName: "Localizable_variable", comment: ""))
-    private let ON: String = String(NSLocalizedString("ON", tableName: "Localizable_variable", comment: ""))
+    private let WAVEFORM: String = String(NSLocalizedString("WAVEFORM", tableName: "Localizable_variable", comment: ""))
+    private let HISTOGRAM: String = String(NSLocalizedString("HISTOGRAM", tableName: "Localizable_variable", comment: ""))
     private let OFF: String = String(NSLocalizedString("OFF", tableName: "Localizable_variable", comment: ""))
+    private let ENABLE: String = String(NSLocalizedString("ENABLE", tableName: "Localizable_variable", comment: ""))
+    private let DISABLE: String = String(NSLocalizedString("DISABLE", tableName: "Localizable_variable", comment: ""))
     
     private let innerSpacing: CGFloat = 12
     private let roundedCornerRadius: CGFloat = 8
+    
+    private var headerSection: some View {
+        Text("Settings")
+            .font(.system(size: 16, weight: .bold, design: .monospaced))
+            .tracking(2)
+            .foregroundColor(.white)
+        
+    }
+    
+    private var previewResSection: some View {
+        VStack(alignment: .leading, spacing: innerSpacing) {
+            Text("Preview Resolution")
+                .font(.caption.bold())
+                .foregroundColor(.gray)
+            
+            HStack(spacing: 0) {
+                SegmentedButton(title: LOW, isSelected: camera.previewResolution == "LOW") {
+                    updateResolution("LOW")
+                }
+                SegmentedButton(title: HIGH, isSelected: camera.previewResolution == "HIGH") {
+                    updateResolution("HIGH")
+                }
+            }
+            .background(Color.white.opacity(0.1))
+            .cornerRadius(roundedCornerRadius)
+        }
+    }
+    
+    private var waveFormHistogramSection: some View {
+        VStack(alignment: .leading, spacing: innerSpacing) {
+            Text("Exposure Indicator")
+                .font(.caption.bold())
+                .foregroundColor(.gray)
+            
+            HStack(spacing: 0) {
+                SegmentedButton(title: WAVEFORM, isSelected: camera.exposureIndicatorMode == .waveform) {
+                    // 💡 物理反馈第一
+                    haptic(.medium)
+                    // 💡 异步开启，防止 GPU 突发负载引起主线程瞬间丢帧
+                    DispatchQueue.main.async {
+                        camera.exposureIndicatorMode = .waveform
+                        camera.histogramImage = nil
+                    }
+                }
+                SegmentedButton(title: HISTOGRAM, isSelected: camera.exposureIndicatorMode == .histogram) {
+                    // 💡 物理反馈第一
+                    haptic(.medium)
+                    // 💡 异步开启，防止 GPU 突发负载引起主线程瞬间丢帧
+                    DispatchQueue.main.async {
+                        camera.exposureIndicatorMode = .histogram
+                        camera.waveformImage = nil
+                    }
+                }
+                SegmentedButton(title: OFF, isSelected: camera.exposureIndicatorMode == .off) {
+                    haptic(.medium)
+                    DispatchQueue.main.async {
+                        camera.exposureIndicatorMode = .off
+                        camera.waveformImage = nil // 立即清空显存
+                        camera.histogramImage = nil
+                    }
+                }
+            }
+            .background(Color.white.opacity(0.1))
+            .cornerRadius(roundedCornerRadius)
+        }
+    }
+    
+    private var enableFrontCameraOrNotSection: some View {
+        VStack (alignment: .leading, spacing: innerSpacing) { // Enable front camera
+            Text("Front Camera")
+                .font(.caption.bold())
+                .foregroundColor(.gray)
+            HStack(spacing: 0) {
+                SegmentedButton(title: ENABLE, isSelected: camera.enableFrontCamera) {
+                    haptic(.medium)
+                    DispatchQueue.main.async {
+                        camera.enableFrontCamera = true
+                    }
+                }
+                SegmentedButton(title: DISABLE, isSelected: !camera.enableFrontCamera) {
+                    haptic(.medium)
+                    DispatchQueue.main.async {
+                        camera.enableFrontCamera = false
+                    }
+                }
+            }
+            .background(Color.white.opacity(0.1))
+            .cornerRadius(roundedCornerRadius)
+        }
+    }
+    
+    private var shutterSoundSection: some View {
+        VStack(alignment: .leading, spacing: innerSpacing) {
+            Text("Shutter Sound")
+                .font(.caption.bold()).foregroundColor(.gray)
+            HStack(spacing: 0) {
+                SegmentedButton(title: "1", isSelected: camera.shutterSoundMode == .sony) {
+                    haptic(.medium)
+                    camera.shutterSoundMode = .sony
+                    camera.changeShutterSound()
+                }
+                SegmentedButton(title: "2", isSelected: camera.shutterSoundMode == .panasonic) {
+                    haptic(.medium)
+                    camera.shutterSoundMode = .panasonic
+                    camera.changeShutterSound()
+                }
+            }
+            .background(Color.white.opacity(0.1)).cornerRadius(roundedCornerRadius)
+        }
+    }
+    
+    private var saveSSandISOsection: some View {
+        VStack(alignment: .leading, spacing: innerSpacing) {
+            Text("Save shutter speed and ISO from last session")
+                .font(.caption.bold()).foregroundColor(.gray)
+            HStack(spacing: 0) {
+                SegmentedButton(title: ENABLE, isSelected: camera.enablePermanentParameterStorage, isDisabled: camera.perferAUTO) {
+                    haptic(.medium)
+                    camera.enablePermanentParameterStorage = true
+                    camera.updateParameterToStorage()
+                }
+                SegmentedButton(title: DISABLE, isSelected: !camera.enablePermanentParameterStorage, isDisabled: camera.perferAUTO) {
+                    haptic(.medium)
+                    camera.enablePermanentParameterStorage = false
+                }
+            }
+            .background(Color.white.opacity(0.1)).cornerRadius(roundedCornerRadius)
+        }
+    }
+    
+    private var preferAUTOsection: some View {
+        VStack(alignment: .leading, spacing: innerSpacing) {
+            Text("Prefer AUTO mode when launched")
+                .font(.caption.bold()).foregroundColor(.gray)
+            HStack(spacing: 0) {
+                SegmentedButton(title: ENABLE, isSelected: camera.perferAUTO) {
+                    camera.perferAUTO = true
+                    camera.enablePermanentParameterStorage = false
+                }
+                SegmentedButton(title: DISABLE, isSelected: !camera.perferAUTO) {
+                    camera.perferAUTO = false
+                }
+            }
+            .background(Color.white.opacity(0.1)).cornerRadius(roundedCornerRadius)
+        }
+    }
+    
+    private var moneyONEGAIsection: some View {
+        VStack(alignment: .leading, spacing: innerSpacing) {
+            Text("Buy me a cup of coffee")
+                .font(.caption.bold()).foregroundColor(.gray)
+            Button(action: {
+                haptic(.light)
+                print("Tapped purchase button!")
+                Task {
+                    let success = await storeManager.purchase()
+                    print("Created the task!")
+                    if success {
+                        haptic(.heavy)
+                        showThanksAlert = true
+                        camera.doneTheTip = true
+                        print("Purchase done!")
+                    }
+                }
+            }) {
+                HStack {
+                    Image(systemName: "cup.and.saucer.fill")
+                    Text("Buy me a cup of coffee!")
+                        .font(.system(size: 14, weight: .bold, design: .monospaced))
+                    Spacer()
+                }
+                .padding()
+                .background(Color.yellow.opacity(0.15))
+                .foregroundColor(.yellow)
+                .cornerRadius(10)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(Color.yellow.opacity(0.4), lineWidth: 1)
+                )
+            }
+            Button(action: {
+                haptic(.light)
+                Task {
+                    let success = await storeManager.restorePurchases()
+                    if success {
+                        haptic(.medium)
+                        showRestoredMsg = true
+                        camera.doneTheTip = true
+                    }
+                }
+            }) {
+                Text("Restore Purchases")
+                    .font(.system(size: 11, design: .monospaced))
+                    .foregroundColor(.gray)
+                    .padding(.top, 4)
+            }
+        }
+    }
+    
+    private var cancelButton: some View {
+        Button(action: {
+            dismissMenu()
+        }) {
+            Image(systemName: "xmark")
+                .font(.system(size: 24))
+                .foregroundColor(Color.white)
+        }
+    }
     
     var body: some View {
         ZStack {
@@ -24,77 +239,56 @@ struct MenuView: View {
             Color.black.opacity(0.9)
                 .ignoresSafeArea()
             
-            VStack(spacing: 20) {
-                // 1. 顶部标题
-                Text("Settings")
-                    .font(.system(size: 16, weight: .bold, design: .monospaced))
-                    .tracking(2)
-                    .foregroundColor(.white)
-                
-                // 2. 预览分辨率选择
-                VStack(alignment: .leading, spacing: innerSpacing) {
-                    Text("Preview Resolution")
-                        .font(.caption.bold())
-                        .foregroundColor(.gray)
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(spacing: 20) {
                     
-                    HStack(spacing: 0) {
-                        SegmentedButton(title: LOW, isSelected: camera.previewResolution == "LOW") {
-                            updateResolution("LOW")
+                    // 1. 顶部标题
+                    ZStack {
+                        HStack {
+                            cancelButton
+                                .padding(10)
+                            Spacer()
                         }
-                        SegmentedButton(title: HIGH, isSelected: camera.previewResolution == "HIGH") {
-                            updateResolution("HIGH")
-                        }
+                        headerSection
                     }
-                    .background(Color.white.opacity(0.1))
-                    .cornerRadius(roundedCornerRadius)
-                }
-                
-                // 3. 波形图开关
-                // MenuView.swift 中的波形图部分
-                VStack(alignment: .leading, spacing: innerSpacing) {
-                    Text("Waveform")
-                        .font(.caption.bold())
-                        .foregroundColor(.gray)
                     
-                    HStack(spacing: 0) {
-                        SegmentedButton(title: ON, isSelected: camera.showWaveform) {
-                            // 💡 物理反馈第一
-                            haptic(.medium)
-                            // 💡 异步开启，防止 GPU 突发负载引起主线程瞬间丢帧
-                            DispatchQueue.main.async {
-                                camera.showWaveform = true
-                            }
-                        }
-                        SegmentedButton(title: OFF, isSelected: !camera.showWaveform) {
-                            haptic(.medium)
-                            DispatchQueue.main.async {
-                                camera.showWaveform = false
-                                camera.waveformImage = nil // 立即清空显存
-                            }
-                        }
+                    // 2. 预览分辨率选择
+                    previewResSection
+                    
+                    // 3. 波形图开关
+                    // MenuView.swift 中的波形图部分
+                    waveFormHistogramSection
+                    
+                    enableFrontCameraOrNotSection
+                    
+                    shutterSoundSection
+                    
+                    saveSSandISOsection
+                    
+                    preferAUTOsection
+                    
+                    if !camera.doneTheTip {
+                        moneyONEGAIsection // かわいいからお金お願いします〜
                     }
-                    .background(Color.white.opacity(0.1))
-                    .cornerRadius(roundedCornerRadius)
+                    
+                    Spacer()
+                    
+                    // 4. 关键修正：关闭按钮
+                    // 采用最高的优先级，物理反馈优先于状态变更
+                    
                 }
-                
-                Spacer()
-                
-                // 4. 关键修正：关闭按钮
-                // 采用最高的优先级，物理反馈优先于状态变更
-                Button(action: {
-                    dismissMenu()
-                }) {
-                    Text("Close")
-                        .font(.system(size: 14, weight: .bold))
-                        .frame(height: 44) // 增加点击热区
-                        .frame(maxWidth: .infinity)
-                        .background(Color.white.opacity(0.15))
-                        .foregroundColor(.white)
-                        .cornerRadius(10)
-                }
-                .padding(.bottom, 20)
+                .padding(30)
             }
-            .padding(30)
+        }
+        .alert("Oh, yeah! You have already donated me! Thank you!", isPresented: $showRestoredMsg) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Thank you!")
+        }
+        .alert("Thank you!", isPresented: $showThanksAlert) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Thank you!")
         }
     }
     
@@ -135,17 +329,45 @@ struct SegmentedButton: View {
     let title: String
     let isSelected: Bool
     let action: () -> Void
+    let isDisabled: Bool
+    
+    init(title: String, isSelected: Bool, action: @escaping () -> Void, isDisabled: Bool = false) {
+        self.title = title
+        self.isSelected = isSelected
+        self.action = action
+        self.isDisabled = isDisabled
+    }
+    
+    func actualAction() {
+        if !isDisabled {
+            action()
+        }
+    }
     
     var body: some View {
-        Button(action: action) {
-            Text(title)
-                .font(.system(size: 14, weight: .bold, design: .monospaced))
-                .frame(maxWidth: .infinity)
-                .frame(height: 40)
-                .background(isSelected ? Color.white : Color.clear)
-                .foregroundColor(isSelected ? Color.black : Color.white)
+        Button(action: actualAction) {
+            if !isDisabled {
+                Text(title)
+                    .font(.system(size: 14, weight: .bold, design: .monospaced))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 40)
+                    .background(isSelected ? Color.white : Color.clear)
+                    .foregroundColor(isSelected ? Color.black : Color.white)
+            } else {
+                Text(title)
+                    .font(.system(size: 14, weight: .bold, design: .monospaced))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 40)
+                    .background(Color.black.opacity(0.4))
+                    .foregroundColor(Color.white.opacity(0.6))
+            }
         }
         // 💡 禁用按钮自带的简单动画，避免与 camera 里的逻辑冲突
         .animation(.none, value: isSelected)
+        .disabled(isDisabled)
     }
+}
+
+#Preview {
+    MenuView(camera: Camera())
 }

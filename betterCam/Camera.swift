@@ -37,13 +37,40 @@ enum UIWidgets: Int, CaseIterable {
 
 class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVCapturePhotoCaptureDelegate {
     
-    let waveformOverlayWidth: Int = 128
-    let waveformOverlayHeight: Int = 64
+    private var isRestoring: Bool = false
+    
+    enum ExposureMode { case waveform, histogram, off }
+    
+    enum ShutterSoundMode: String, CaseIterable {
+        case sony       = "shutter_eqed_gained"
+        case panasonic  = "s1m2_shutter_gained"
+    }
+    
+    @AppStorage("doneTheTip") var doneTheTip: Bool = false
+    
+    private var oldShutterSoundMode: ShutterSoundMode = .sony
+    @AppStorage("shutterSoundMode") var shutterSoundMode: ShutterSoundMode = .sony
+    
+    @Published var currentFocalLength: Int = 26
+    
+    @Published var enableFrontCamera: Bool = false {
+        didSet {
+            discoverCameras()
+        }
+    }
+    
+    let overlayWidth: Int = 128
+    let overlayHeight: Int = 64
     
     private var device: MTLDevice? = MTLCreateSystemDefaultDevice()
     private var commandQueue: MTLCommandQueue?
     private var pipelineState: MTLComputePipelineState?
     private var textureCache: CVMetalTextureCache?
+    
+    private var histogramComputePipeline: MTLComputePipelineState?
+    private let histogramRenderPipeline: MTLRenderPipelineState? = nil// 用于将数据画成条形图
+    private var histogramBuffer: MTLBuffer?
+    @Published var histogramImage: CGImage?
         
     @Published var waveformImage: CGImage? // 用于 UI 显示
     
@@ -87,7 +114,7 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     
     private var isConfiguring: Bool = false
     
-    @Published var showWaveform: Bool = false
+    @Published var exposureIndicatorMode: ExposureMode = .off
     @Published var isShowingMenu = false {
         didSet {
             sessionQueue.async { [weak self] in
@@ -114,6 +141,20 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
         CVMetalTextureCacheCreate(kCFAllocatorDefault, nil, device, nil, &textureCache)
     }
     
+    func changeShutterSound() {
+        if oldShutterSoundMode != shutterSoundMode {
+            setupShutterSound()
+            oldShutterSoundMode = shutterSoundMode
+            UserDefaults.standard.set(shutterSoundMode.rawValue, forKey: "shutterSoundMode")
+        }
+    }
+    
+    func loadShutterSoundFromStorage() {
+        if let savedShutterSoundMode = UserDefaults.standard.string(forKey: "shutterSoundMode") {
+            shutterSoundMode = ShutterSoundMode(rawValue: savedShutterSoundMode) ?? .sony
+        }
+    }
+    
     func callAllStartupFuncs() {
         setupMetal()
         setupTextureCache()
@@ -122,11 +163,13 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
         discoverCameras()
         setupShutterSound()
         setupSession()
-        setupLightMeter()
+        loadShutterSoundFromStorage()
+        loadParameterFromStorage()
         setupLightMeter()
         applyResolutionSettings()
         startDeviceMotion()
         syncAllLUTsToOptions()
+        getEquivalentFocalLength()
     }
     
     override init() {
@@ -160,6 +203,7 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     @Published var currentDeviceIndex: Int = 0 {
         didSet {
             setupLightMeter()
+            getEquivalentFocalLength()
         }
     }
     
@@ -202,8 +246,8 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
         
     }
     
-    private var lastSS: String = ""
-    private var lastISO: String = ""
+    private var lastSS: String = "1/200"
+    private var lastISO: String = "ISO 100"
     private func autoAmode(nowBeingControlled: String) {
         if nowBeingControlled == "SS" {
             if SS == "AUTO" && ISO != "AUTO" {
@@ -227,18 +271,60 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
             }
         }
     }
+    
+    @AppStorage("enablePermanentParameterStorage") var enablePermanentParameterStorage: Bool = false
+    @AppStorage("perferAUTO") var perferAUTO: Bool = false
+    
+    func updateParameterToStorage() {
+        print("PermanentParameterStorageEnabled?", enablePermanentParameterStorage)
+        if enablePermanentParameterStorage {
+            print("Wrote parameter to disk!")
+            UserDefaults.standard.set(SS, forKey: "SS")
+            UserDefaults.standard.set(ISO, forKey: "ISO")
+            if let savedISO = UserDefaults.standard.string(forKey: "ISO") {
+                print("Saved ISO:", savedISO) // FOR DEBUG
+            }
+        }
+    }
+    
+    func loadParameterFromStorage() {
+        isRestoring = true
+        if UserDefaults.standard.bool(forKey: "perferAUTO") {
+            self.SS = "AUTO"
+            self.ISO = "AUTO"
+            isRestoring = false
+            return
+        }
+        if UserDefaults.standard.bool(forKey: "enablePermanentParameterStorage") {
+            if let savedSS = UserDefaults.standard.string(forKey: "SS") {
+                self.SS = savedSS
+            }
+            if let savedISO = UserDefaults.standard.string(forKey: "ISO") {
+                self.ISO = savedISO
+            }
+            print("✅ 参数已从磁盘恢复: SS=\(SS), ISO=\(ISO)")
+        }
+        isRestoring = false
+    }
+    
+    // TODO: Add a permanent storage for parameters
     @Published var SS: String = "1/200" {
         didSet {
+            guard !isRestoring else { return }
             autoAmode(nowBeingControlled: "SS")
             updateExposure()
+            updateParameterToStorage()
     }
     }
     @Published var Aperture: String = "F1.8"
     @Published var EV: String = "0.0" { didSet { updateExposure() } }
     @Published var ISO: String = "ISO 100" {
         didSet {
+            print("ISO changed!")
+            guard !isRestoring else { return }
             autoAmode(nowBeingControlled: "ISO")
             updateExposure()
+            updateParameterToStorage()
         }
     }
     // var styleOptions: [String] = ["STD", "RICH", "NOSTALGIC", "BW", "MANAGE"]
@@ -246,7 +332,7 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     var styleOptions: [String] = []
     var AFModeOptions: [String] = ["AF-C", "AF-S"]
     @Published var style: String = "STD"
-    @Published var imageQuality: String = "DNG+J"
+    @Published var imageQuality: String = "JPEG"
     @Published var aspectRatio: String = "4:3"
     @Published var AFMode: String = "AF-C" {
         didSet {
@@ -293,6 +379,45 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     
     private let motionManager = CMMotionManager()
     private var deviceOrientation: AVCaptureVideoOrientation = .portrait
+    
+    func getEquivalentFocalLength() {
+        guard availableDevices.indices.contains(currentDeviceIndex) else { return }
+        let device = availableDevices[currentDeviceIndex]
+        
+        // 1. 获取原始计算值
+        let hFOV = device.activeFormat.videoFieldOfView
+        let radians = hFOV * Float.pi / 180.0
+        var calculatedEquivalent = 36.0 / (2.0 * tan(radians / 2.0))
+        
+        if device.deviceType == .builtInUltraWideCamera {
+            if Int(round(calculatedEquivalent)) == 14 {
+                calculatedEquivalent = 13
+            }
+        }
+        
+        // 2. 针对主摄进行硬校准
+        // iPhone 主摄在预览流下算出来常为 26.8-27.2，但在全像素下是 24 或 26
+        if device.deviceType == .builtInWideAngleCamera {
+            // 根据不同机型微调，通常主摄强制归位到 24 或 26 看起来最自然
+            if calculatedEquivalent > 23 && calculatedEquivalent < 28 {
+                // 这里可以根据你的 iPhone 15/16 Pro 经验，如果是 27 左右就显示 26
+                if calculatedEquivalent > 26.5 {
+                    calculatedEquivalent = 26
+                } else {
+                    calculatedEquivalent = 24
+                }
+            }
+        }
+        
+        // 3. 针对长焦 (Telephoto)
+        // 长焦常算出来是 78，系统显示 77；或算出来 122，系统显示 120
+        if device.deviceType == .builtInTelephotoCamera {
+            if calculatedEquivalent > 70 && calculatedEquivalent < 80 { calculatedEquivalent = 72 }
+            if calculatedEquivalent > 110 && calculatedEquivalent < 125 { calculatedEquivalent = 120 }
+        }
+        
+        self.currentFocalLength = Int(round(calculatedEquivalent))
+    }
 
         // 在 init 中启动监测
     func startDeviceMotion() {
@@ -362,15 +487,36 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     
     
     func discoverCameras() {
-        let discoverySession = AVCaptureDevice.DiscoverySession(deviceTypes: [.builtInWideAngleCamera, .builtInUltraWideCamera, .builtInTelephotoCamera], mediaType: .video, position: .back)
-        self.availableDevices = discoverySession.devices
+        // 将 position 设置为 .unspecified 可以搜索到所有方向的镜头
+        let discoverySession = AVCaptureDevice.DiscoverySession(
+            deviceTypes: [
+                .builtInWideAngleCamera,
+                .builtInUltraWideCamera,
+                .builtInTelephotoCamera,
+            ],
+            mediaType: .video,
+            position: .unspecified // 💡 修改点：允许前置和后置
+        )
+        
+        // 如果你只想在特定条件下显示前置，可以在这里过滤
+        if enableFrontCamera {
+            self.availableDevices = discoverySession.devices
+        } else {
+            // 仅保留后置镜头
+            self.availableDevices = discoverySession.devices.filter { $0.position == .back }
+        }
+        print("Available camera counts:", self.availableDevices.count)
     }
     
     func switchCamera(direction: Int) {
         guard availableDevices.count > 1 else { return }
         if currentDeviceIndex + direction >= 0 {
-            currentDeviceIndex = (currentDeviceIndex + 1) % availableDevices.count
+            print("In branch 1")
+            print(currentDeviceIndex, "->", (currentDeviceIndex + direction) % availableDevices.count)
+            currentDeviceIndex = (currentDeviceIndex + direction) % availableDevices.count
         } else {
+            print("In branch 2")
+            print(currentDeviceIndex, "->", availableDevices.count - 1)
             currentDeviceIndex = (availableDevices.count - 1)
         }
         let newDevice = availableDevices[currentDeviceIndex]
@@ -383,7 +529,6 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
             if session.canAddInput(newInput) {
                 session.addInput(newInput)
                 // 💡 关键：切换后立即更新光圈显示和 SS/ISO 可用范围
-                self.Aperture = String(format: "F%.1f", newDevice.lensAperture)
                 self.actualSSoptions = self.SSoptions.supportedSS(for: newDevice)
                 self.actualISOoptions = self.ISOoptions.supportedISO(for: newDevice).formattedISOoptions()
                 updateExposure()
@@ -446,7 +591,6 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
                 isAdjustingValue = false
             }
         }
-        print(isShowingMenu)
         
         // 2. 物理反馈：按下时震动一下
         // 这里使用 medium 震动，区别于拨轮旋转时的 light 震动
@@ -523,11 +667,39 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         
-        if showWaveform {
-            self.processWaveform(from: pixelBuffer)
-        }
+        switch exposureIndicatorMode {
+            case .waveform:
+                self.processWaveform(from: pixelBuffer)
+                if histogramImage != nil { DispatchQueue.main.async { self.histogramImage = nil } }
+            case .histogram:
+                self.processHistogram(from: pixelBuffer)
+                if waveformImage != nil { DispatchQueue.main.async { self.waveformImage = nil } }
+            case .off:
+                // 模式关闭时，确保清空图片引用，释放内存
+                if waveformImage != nil || histogramImage != nil {
+                    DispatchQueue.main.async {
+                        self.waveformImage = nil
+                        self.histogramImage = nil
+                    }
+                }
+            }
         
-        let ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+        var ciImage = CIImage(cvPixelBuffer: pixelBuffer)
+        
+
+        if let videoDevice = availableDevices.indices.contains(currentDeviceIndex) ? availableDevices[currentDeviceIndex] : nil,
+           videoDevice.position == .front {
+            
+            // 1. 先将图像移回 (0,0) 原点，防止 extent 偏移干扰翻转
+            let originTransform = CGAffineTransform(translationX: -ciImage.extent.origin.x, y: -ciImage.extent.origin.y)
+            var correctedImage = ciImage.transformed(by: originTransform)
+            
+            // 2. 💡 执行镜像：翻转 X 轴并平移回显示区域
+            let mirrorTransform = CGAffineTransform(scaleX: 1, y: -1)
+                .translatedBy(x: -correctedImage.extent.width, y: 0)
+            
+            ciImage = correctedImage.transformed(by: mirrorTransform)
+        }
         
         // 💡 传入实时强度参数
         let finalImage = (imageQuality == "DNG") ? ciImage :
@@ -599,8 +771,32 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     }
     
     private func setupShutterSound() {
-        guard let soundURL = Bundle.main.url(forResource: "shutter_eqed_gained", withExtension: "aac") else { return }
-        AudioServicesCreateSystemSoundID(soundURL as CFURL, &shutterSoundID)
+        // 1. 彻底销毁旧 ID，防止资源占用
+        if shutterSoundID != 0 {
+            AudioServicesDisposeSystemSoundID(shutterSoundID)
+            shutterSoundID = 0
+        }
+        
+        // 2. 这里的 shutterSoundMode.rawValue 应该对应你工程里的文件名
+        let fileName = shutterSoundMode.rawValue
+        print(fileName)
+        
+        // 💡 调试打印：如果你在切换到 2 时静音，控制台会显示路径是否为空
+        guard let soundURL = Bundle.main.url(forResource: fileName, withExtension: "aac") else {
+            print("❌ 错误：找不到音频文件: \(fileName).aac")
+            return
+        }
+        
+        // 3. 重新创建 SoundID
+        var soundID: SystemSoundID = 0
+        let status = AudioServicesCreateSystemSoundID(soundURL as CFURL, &soundID)
+        
+        if status == kAudioServicesNoError {
+            self.shutterSoundID = soundID
+            print("✅ 成功加载快门音: \(fileName)")
+        } else {
+            print("❌ 无法创建 SystemSoundID，状态码: \(status)")
+        }
     }
     
     func playShutterSound() {
@@ -608,7 +804,7 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
             AudioServicesPlaySystemSound(shutterSoundID)
         }
     }
-    
+     
     private func adjustValue(direction: Int) {
         switch activeIndex {
         case UIWidgets.AFMode.rawValue:
@@ -700,7 +896,7 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
                 
                 // 回到主线程更新 @Published 变量以刷新 UI
                 DispatchQueue.main.async {
-                    self.Aperture = "F" + String(finalAperture)
+                    self.Aperture = String(format: "F%.1f", finalAperture)
                 }
                 
                 device.unlockForConfiguration()
@@ -727,55 +923,7 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
         
         if !photo.isRawPhoto {
             guard let imageData = photo.fileDataRepresentation(),
-                  let ciImage = CIImage(data: imageData) else { return }
-            
-            // 1. 应用滤镜处理
-            let filteredImage = FilmEngine.shared.process(ciImage, styleName: style, lutIntensity: lutIntensity, grainIntensity: grainIntensity)
-            
-            // 2. 渲染为中间 CGImage
-            let context = CIContext()
-            guard let cgImage = context.createCGImage(filteredImage, from: filteredImage.extent) else { return }
-            
-            // 3. 准备手动写入元数据的 Data 对象
-            let outputData = NSMutableData()
-            guard let destination = CGImageDestinationCreateWithData(outputData as CFMutableData, UTType.jpeg.identifier as CFString, 1, nil) else { return }
-            
-            // 💡 关键点：获取并修正元数据
-            var metadata = photo.metadata
-            
-            // 确保方向被显式写入，防止 Core Image 渲染后丢失旋转信息
-            if let orientation = photo.metadata[kCGImagePropertyOrientation as String] {
-                metadata[kCGImagePropertyOrientation as String] = orientation
-            }
-            
-            // 4. 将 CGImage 和 元数据 合并写入
-            CGImageDestinationAddImage(destination, cgImage, metadata as CFDictionary)
-            
-            if CGImageDestinationFinalize(destination) {
-                saveImageDataToLibrary(outputData as Data, isRaw: false)
-            }
-        }
-    }
-     */
-    
-    func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
-        if let error = error { return }
-        defer { DispatchQueue.main.async { self.isCapturing = false } }
-        
-        // --- 逻辑 A: 处理 RAW (DNG) 数据 ---
-        if photo.isRawPhoto {
-            if let rawData = photo.fileDataRepresentation() {
-                saveImageDataToLibrary(rawData, isRaw: true)
-            }
-            if imageQuality == "DNG" { return }
-        }
-        
-        // --- 逻辑 B: 处理 JPEG (带滤镜) 数据 ---
-        guard imageQuality != "DNG" else { return }
-        
-        if !photo.isRawPhoto {
-            guard let imageData = photo.fileDataRepresentation(),
-                  let ciImage = CIImage(data: imageData) else { return }
+                  var ciImage = CIImage(data: imageData) else { return }
             
             // 1. 应用滤镜处理
             let filteredImage = FilmEngine.shared.process(ciImage, styleName: style, lutIntensity: lutIntensity, grainIntensity: grainIntensity)
@@ -832,6 +980,15 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
         // 💡 核心修复：EXIF信息校正。强制快门优先，防止算法重置快门时长
         photoSettings.photoQualityPrioritization = .speed
         photoSettings.isShutterSoundSuppressionEnabled = true
+        
+        if let photoConnection = photoOutput.connection(with: .video) {
+            if let videoDevice = availableDevices.indices.contains(currentDeviceIndex) ? availableDevices[currentDeviceIndex] : nil,
+               videoDevice.position == .front {
+                photoConnection.isVideoMirrored = true // 开启硬件级镜像
+            } else {
+                photoConnection.isVideoMirrored = false
+            }
+        }
         
         photoOutput.capturePhoto(with: photoSettings, delegate: self)
         playShutterSound()
@@ -892,24 +1049,25 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     }
     
     private func saveImageDataToLibrary(_ data: Data, isRaw: Bool) {
+        ShutterManager.incrementShutter()
         PHPhotoLibrary.shared().performChanges({
-                let creationRequest = PHAssetCreationRequest.forAsset()
-                
-                if isRaw {
-                    // 💡 修复点：使用 PHAssetResourceCreationOptions 的正确方式
-                    let options = PHAssetResourceCreationOptions()
-                    // 确保 DNG 格式被正确识别，有些 iOS 版本需要通过 options 显式指定
-                    creationRequest.addResource(with: .photo, data: data, options: options)
-                } else {
-                    creationRequest.addResource(with: .photo, data: data, options: nil)
-                }
-            }) { success, error in
-                if success {
-                    print("✅ \(isRaw ? "RAW" : "JPEG") 保存成功")
-                } else if let error = error {
-                    print("❌ 保存失败: \(error.localizedDescription)")
-                }
+            let creationRequest = PHAssetCreationRequest.forAsset()
+            
+            if isRaw {
+                // 💡 修复点：使用 PHAssetResourceCreationOptions 的正确方式
+                let options = PHAssetResourceCreationOptions()
+                // 确保 DNG 格式被正确识别，有些 iOS 版本需要通过 options 显式指定
+                creationRequest.addResource(with: .photo, data: data, options: options)
+            } else {
+                creationRequest.addResource(with: .photo, data: data, options: nil)
             }
+        }) { success, error in
+            if success {
+                print("✅ \(isRaw ? "RAW" : "JPEG") 保存成功")
+            } else if let error = error {
+                print("❌ 保存失败: \(error.localizedDescription)")
+            }
+        }
     }
 }
 
@@ -986,37 +1144,45 @@ enum DevicePerformanceTier {
 }
 
 extension Camera {
+    // MARK: - Metal Setup
     func setupMetal() {
         guard let device = device else { return }
         commandQueue = device.makeCommandQueue()
         let library = device.makeDefaultLibrary()
+        
+        // 初始化 Waveform 管线
         if let kernel = library?.makeFunction(name: "waveformKernel") {
             pipelineState = try? device.makeComputePipelineState(function: kernel)
         }
+        
+        // 初始化 Histogram 计算管线
+        if let histKernel = library?.makeFunction(name: "histogram_compute") {
+            histogramComputePipeline = try! device.makeComputePipelineState(function: histKernel)
+        }
+        
+        // 初始化直方图 Buffer (256个等级)
+        histogramBuffer = device.makeBuffer(length: 256 * MemoryLayout<UInt32>.stride, options: .storageModeShared)
     }
 
-        // 💡 在 captureOutput 中调用异步 Metal 计算
+    // MARK: - Waveform Process
     func processWaveform(from pixelBuffer: CVPixelBuffer) {
-        // 💡 只有开启显示且硬件就绪时才执行
-        guard showWaveform,
+        guard exposureIndicatorMode == .waveform,
               let pipeline = pipelineState,
               let queue = commandQueue,
               let cache = textureCache else { return }
         
-        // 1. 将 CVPixelBuffer 转换为输入纹理 (零拷贝)
         let width = CVPixelBufferGetWidth(pixelBuffer)
         let height = CVPixelBufferGetHeight(pixelBuffer)
         var cvTexture: CVMetalTexture?
         
         CVMetalTextureCacheCreateTextureFromImage(kCFAllocatorDefault, cache, pixelBuffer, nil, .bgra8Unorm, width, height, 0, &cvTexture)
-        
         guard let inputTexture = CVMetalTextureGetTexture(cvTexture!) else { return }
         
-        let desc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm, width: waveformOverlayWidth, height: waveformOverlayHeight, mipmapped: false)
+        // 输出纹理强制设为 128x64
+        let desc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm, width: overlayWidth, height: overlayHeight, mipmapped: false)
         desc.usage = [.shaderWrite, .shaderRead]
         guard let outputTexture = device?.makeTexture(descriptor: desc) else { return }
         
-        // 3. 配置并执行 Metal 指令
         guard let commandBuffer = queue.makeCommandBuffer(),
               let encoder = commandBuffer.makeComputeCommandEncoder() else { return }
         
@@ -1024,7 +1190,6 @@ extension Camera {
         encoder.setTexture(inputTexture, index: 0)
         encoder.setTexture(outputTexture, index: 1)
         
-        // 计算 Threadgroups (根据输出纹理大小分配)
         let threadGroupSize = MTLSize(width: 16, height: 16, depth: 1)
         let threadGroups = MTLSize(width: (outputTexture.width + 15) / 16,
                                    height: (outputTexture.height + 15) / 16,
@@ -1033,22 +1198,90 @@ extension Camera {
         encoder.dispatchThreadgroups(threadGroups, threadsPerThreadgroup: threadGroupSize)
         encoder.endEncoding()
         
-        // 4. 异步回调处理输出图像
         commandBuffer.addCompletedHandler { [weak self] _ in
             guard let self = self else { return }
-            
-            // 💡 关键：将计算结果转为 CGImage
-            // 注意：这里需要一个辅助函数来从 Texture 读取数据，为了性能，建议直接在 UI 层用 MTKView 显示纹理
             let cgImage = self.makeCGImage(from: outputTexture)
-            
             DispatchQueue.main.async {
                 self.waveformImage = cgImage
             }
         }
-        
         commandBuffer.commit()
     }
-    
+
+    // MARK: - Histogram Process
+    func processHistogram(from pixelBuffer: CVPixelBuffer) {
+        guard exposureIndicatorMode == .histogram,
+              let pipeline = histogramComputePipeline,
+              let queue = commandQueue,
+              let cache = textureCache,
+              let hBuffer = histogramBuffer else { return }
+
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        var cvTexture: CVMetalTexture?
+        CVMetalTextureCacheCreateTextureFromImage(kCFAllocatorDefault, cache, pixelBuffer, nil, .bgra8Unorm, width, height, 0, &cvTexture)
+        guard let inputTexture = CVMetalTextureGetTexture(cvTexture!) else { return }
+
+        // 重置统计数据
+        memset(hBuffer.contents(), 0, hBuffer.length)
+
+        guard let commandBuffer = queue.makeCommandBuffer(),
+              let encoder = commandBuffer.makeComputeCommandEncoder() else { return }
+
+        encoder.setComputePipelineState(pipeline)
+        encoder.setTexture(inputTexture, index: 0)
+        encoder.setBuffer(hBuffer, offset: 0, index: 0)
+
+        let w = pipeline.threadExecutionWidth
+        let h = pipeline.maxTotalThreadsPerThreadgroup / w
+        let threadsPerGroup = MTLSize(width: w, height: h, depth: 1)
+        let gridSize = MTLSize(width: (inputTexture.width + w - 1) / w,
+                               height: (inputTexture.height + h - 1) / h,
+                               depth: 1)
+
+        encoder.dispatchThreadgroups(gridSize, threadsPerThreadgroup: threadsPerGroup)
+        encoder.endEncoding()
+
+        commandBuffer.addCompletedHandler { [weak self] _ in
+            self?.renderHistogramUI()
+        }
+        commandBuffer.commit()
+    }
+
+    private func renderHistogramUI() {
+        guard let buffer = histogramBuffer else { return }
+        let ptr = buffer.contents().bindMemory(to: UInt32.self, capacity: 256)
+        
+        var maxCount: Float = 1.0
+        for i in 0..<256 { maxCount = max(maxCount, Float(ptr[i])) }
+
+        // 适配 128x64 规格
+        let size = CGSize(width: CGFloat(overlayWidth), height: CGFloat(overlayHeight))
+        let renderer = UIGraphicsImageRenderer(size: size)
+        
+        let image = renderer.image { context in
+            let ctx = context.cgContext
+            ctx.setFillColor(UIColor.white.cgColor)
+            
+            // 💡 优化：256 bins 对应 128 像素，每像素合并 2 bins
+            let binsPerPixel = 2
+            
+            for x in 0..<overlayWidth {
+                let binIndex = x * binsPerPixel
+                // 取两个相邻 bin 的平均值保证曲线平滑
+                let count = Float(ptr[binIndex] + ptr[binIndex + 1]) / 2.0
+                let barHeight = CGFloat(count / maxCount) * size.height
+                
+                ctx.fill(CGRect(x: CGFloat(x), y: size.height - barHeight, width: 1.0, height: barHeight))
+            }
+        }
+
+        DispatchQueue.main.async {
+            self.histogramImage = image.cgImage
+        }
+    }
+
+    // MARK: - Helpers
     func makeCGImage(from texture: MTLTexture) -> CGImage? {
         let width = texture.width
         let height = texture.height
@@ -1064,40 +1297,22 @@ extension Camera {
         return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: rowBytes, space: colorSpace, bitmapInfo: bitmapInfo, provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
     }
     
+    // MARK: - Performance & Resolution
     var performanceTier: DevicePerformanceTier {
         let id = UIDevice.current.modelIdentifier
-        
-        // 1. 提取型号中的主要数字部分（例如从 "iPhone16,1" 提取出 16）
-        // 💡 技巧：使用 Scanner 提取字符串中的第一个数字
         let scanner = Scanner(string: id)
         _ = scanner.scanUpToCharacters(from: .decimalDigits)
         let modelMajorVersion = scanner.scanInt() ?? 0
         
-        // 2. 基于数字范围进行“未来兼容”判定
-        // iPhone 15 系列的代号是 16
-        // iPhone 16 系列的代号是 17
-        
-        if modelMajorVersion >= 17 {
-            // 💡 判定为未来机型或现有的 Pro 系列（支持 ProRes / 4K）
-            return .pro
-        } else if modelMajorVersion >= 15 {
-            // 💡 iPhone 13 (14,x) 到 iPhone 15 (16,x) 之间
-            return .high
-        } else {
-            // 💡 更旧的设备，默认 1080P 以保证实时噪点渲染不掉帧
-            return .standard
-        }
+        if modelMajorVersion >= 17 { return .pro }
+        else if modelMajorVersion >= 15 { return .high }
+        else { return .standard }
     }
         
-        // 💡 根据型号初始化默认分辨率
     func setDefaultResolution() {
         switch performanceTier {
-        case .pro:
-            self.previewResolution = "HIGH"
-        case .high:
-            self.previewResolution = "HIGH"
-        case .standard:
-            self.previewResolution = "LOW"
+        case .pro, .high: self.previewResolution = "HIGH"
+        case .standard: self.previewResolution = "LOW"
         }
     }
 }

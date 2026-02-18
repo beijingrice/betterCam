@@ -8,9 +8,20 @@
 
 /* Begin PBXBuildFile section */
 		1A442D4F2F2BAEFE00EADEE3 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 1A442D4E2F2BAEFE00EADEE3 /* Localizable.xcstrings */; };
+		1A5DA7B02F4583B3003512B0 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 1A442D4E2F2BAEFE00EADEE3 /* Localizable.xcstrings */; };
+		1A6C41372F3732B500DCE6AB /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1A6C41362F3732B500DCE6AB /* WidgetKit.framework */; };
+		1A6C41392F3732B500DCE6AB /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1A6C41382F3732B500DCE6AB /* SwiftUI.framework */; };
+		1A6C414A2F3732B600DCE6AB /* BetterCamWidgetsExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 1A6C41342F3732B500DCE6AB /* BetterCamWidgetsExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		1A6C41482F3732B600DCE6AB /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 1AB07E3B2F21F48200CBA2B6 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 1A6C41332F3732B500DCE6AB;
+			remoteInfo = BetterCamWidgetsExtension;
+		};
 		1AB07E512F21F48300CBA2B6 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 1AB07E3B2F21F48200CBA2B6 /* Project object */;
@@ -27,8 +38,26 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		1A6C414F2F3732B600DCE6AB /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				1A6C414A2F3732B600DCE6AB /* BetterCamWidgetsExtension.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		1A442D4E2F2BAEFE00EADEE3 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		1A5DA7A92F4574BC003512B0 /* BetterCamWidgetsExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = BetterCamWidgetsExtension.entitlements; sourceTree = "<group>"; };
+		1A6C41342F3732B500DCE6AB /* BetterCamWidgetsExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = BetterCamWidgetsExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		1A6C41362F3732B500DCE6AB /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
+		1A6C41382F3732B500DCE6AB /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
 		1AB07E432F21F48200CBA2B6 /* betterCam.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = betterCam.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		1AB07E502F21F48300CBA2B6 /* betterCamTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = betterCamTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1AB07E5A2F21F48300CBA2B6 /* betterCamUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = betterCamUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -42,13 +71,45 @@
 			);
 			target = 1AB07E422F21F48200CBA2B6 /* betterCam */;
 		};
+		1A5DA7A72F45669E003512B0 /* Exceptions for "BetterCamWidgets" folder in "betterCam" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				BetterCamWidget.swift,
+			);
+			target = 1AB07E422F21F48200CBA2B6 /* betterCam */;
+		};
+		1A6C414E2F3732B600DCE6AB /* Exceptions for "BetterCamWidgets" folder in "BetterCamWidgetsExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 1A6C41332F3732B500DCE6AB /* BetterCamWidgetsExtension */;
+		};
+		1A6C41512F373E7100DCE6AB /* Exceptions for "betterCam" folder in "BetterCamWidgetsExtension" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				CameraIntent.swift,
+				ShutterManager/ShutterManager.swift,
+			);
+			target = 1A6C41332F3732B500DCE6AB /* BetterCamWidgetsExtension */;
+		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
+		1A6C413A2F3732B500DCE6AB /* BetterCamWidgets */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				1A5DA7A72F45669E003512B0 /* Exceptions for "BetterCamWidgets" folder in "betterCam" target */,
+				1A6C414E2F3732B600DCE6AB /* Exceptions for "BetterCamWidgets" folder in "BetterCamWidgetsExtension" target */,
+			);
+			path = BetterCamWidgets;
+			sourceTree = "<group>";
+		};
 		1AB07E452F21F48200CBA2B6 /* betterCam */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
 				1A57DD232F29F09000A13534 /* Exceptions for "betterCam" folder in "betterCam" target */,
+				1A6C41512F373E7100DCE6AB /* Exceptions for "betterCam" folder in "BetterCamWidgetsExtension" target */,
 			);
 			path = betterCam;
 			sourceTree = "<group>";
@@ -66,6 +127,15 @@
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
+		1A6C41312F3732B500DCE6AB /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1A6C41392F3732B500DCE6AB /* SwiftUI.framework in Frameworks */,
+				1A6C41372F3732B500DCE6AB /* WidgetKit.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		1AB07E402F21F48200CBA2B6 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
@@ -90,13 +160,25 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
+		1A6C41352F3732B500DCE6AB /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				1A6C41362F3732B500DCE6AB /* WidgetKit.framework */,
+				1A6C41382F3732B500DCE6AB /* SwiftUI.framework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 		1AB07E3A2F21F48200CBA2B6 = {
 			isa = PBXGroup;
 			children = (
+				1A5DA7A92F4574BC003512B0 /* BetterCamWidgetsExtension.entitlements */,
 				1A442D4E2F2BAEFE00EADEE3 /* Localizable.xcstrings */,
 				1AB07E452F21F48200CBA2B6 /* betterCam */,
 				1AB07E532F21F48300CBA2B6 /* betterCamTests */,
 				1AB07E5D2F21F48300CBA2B6 /* betterCamUITests */,
+				1A6C413A2F3732B500DCE6AB /* BetterCamWidgets */,
+				1A6C41352F3732B500DCE6AB /* Frameworks */,
 				1AB07E442F21F48200CBA2B6 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -107,6 +189,7 @@
 				1AB07E432F21F48200CBA2B6 /* betterCam.app */,
 				1AB07E502F21F48300CBA2B6 /* betterCamTests.xctest */,
 				1AB07E5A2F21F48300CBA2B6 /* betterCamUITests.xctest */,
+				1A6C41342F3732B500DCE6AB /* BetterCamWidgetsExtension.appex */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -114,6 +197,28 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		1A6C41332F3732B500DCE6AB /* BetterCamWidgetsExtension */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1A6C414B2F3732B600DCE6AB /* Build configuration list for PBXNativeTarget "BetterCamWidgetsExtension" */;
+			buildPhases = (
+				1A6C41302F3732B500DCE6AB /* Sources */,
+				1A6C41312F3732B500DCE6AB /* Frameworks */,
+				1A6C41322F3732B500DCE6AB /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				1A6C413A2F3732B500DCE6AB /* BetterCamWidgets */,
+			);
+			name = BetterCamWidgetsExtension;
+			packageProductDependencies = (
+			);
+			productName = BetterCamWidgetsExtension;
+			productReference = 1A6C41342F3732B500DCE6AB /* BetterCamWidgetsExtension.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 		1AB07E422F21F48200CBA2B6 /* betterCam */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = 1AB07E642F21F48300CBA2B6 /* Build configuration list for PBXNativeTarget "betterCam" */;
@@ -121,10 +226,12 @@
 				1AB07E3F2F21F48200CBA2B6 /* Sources */,
 				1AB07E402F21F48200CBA2B6 /* Frameworks */,
 				1AB07E412F21F48200CBA2B6 /* Resources */,
+				1A6C414F2F3732B600DCE6AB /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				1A6C41492F3732B600DCE6AB /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				1AB07E452F21F48200CBA2B6 /* betterCam */,
@@ -192,6 +299,9 @@
 				LastSwiftUpdateCheck = 2620;
 				LastUpgradeCheck = 2620;
 				TargetAttributes = {
+					1A6C41332F3732B500DCE6AB = {
+						CreatedOnToolsVersion = 26.2;
+					};
 					1AB07E422F21F48200CBA2B6 = {
 						CreatedOnToolsVersion = 26.2;
 					};
@@ -224,11 +334,20 @@
 				1AB07E422F21F48200CBA2B6 /* betterCam */,
 				1AB07E4F2F21F48300CBA2B6 /* betterCamTests */,
 				1AB07E592F21F48300CBA2B6 /* betterCamUITests */,
+				1A6C41332F3732B500DCE6AB /* BetterCamWidgetsExtension */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
+		1A6C41322F3732B500DCE6AB /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				1A5DA7B02F4583B3003512B0 /* Localizable.xcstrings in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		1AB07E412F21F48200CBA2B6 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -254,6 +373,13 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
+		1A6C41302F3732B500DCE6AB /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		1AB07E3F2F21F48200CBA2B6 /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
@@ -278,6 +404,11 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		1A6C41492F3732B600DCE6AB /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 1A6C41332F3732B500DCE6AB /* BetterCamWidgetsExtension */;
+			targetProxy = 1A6C41482F3732B600DCE6AB /* PBXContainerItemProxy */;
+		};
 		1AB07E522F21F48300CBA2B6 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 1AB07E422F21F48200CBA2B6 /* betterCam */;
@@ -291,6 +422,76 @@
 /* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
+		1A6C414C2F3732B600DCE6AB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = BetterCamWidgetsExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = QHSG8V3GKU;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = BetterCamWidgets/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = BetterCamWidgets;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ppschool.betterCam.BetterCamWidgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		1A6C414D2F3732B600DCE6AB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = BetterCamWidgetsExtension.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = QHSG8V3GKU;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = BetterCamWidgets/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = BetterCamWidgets;
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.ppschool.betterCam.BetterCamWidgets;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
 		1AB07E622F21F48300CBA2B6 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -417,6 +618,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = betterCam/betterCam.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = QHSG8V3GKU;
@@ -432,12 +634,12 @@
 				INFOPLIST_KEY_UIStatusBarHidden = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationLandscapeRight;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
-				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.1;
+				MARKETING_VERSION = 1.5;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ppschool.betterCam;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -459,6 +661,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = betterCam/betterCam.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = QHSG8V3GKU;
@@ -474,12 +677,12 @@
 				INFOPLIST_KEY_UIStatusBarHidden = YES;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationLandscapeRight;
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown";
-				IPHONEOS_DEPLOYMENT_TARGET = 18.6;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 1.1;
+				MARKETING_VERSION = 1.5;
 				PRODUCT_BUNDLE_IDENTIFIER = com.ppschool.betterCam;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
@@ -508,11 +711,15 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.ppschool.betterCamTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/betterCam.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/betterCam";
 			};
 			name = Debug;
@@ -529,11 +736,15 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.ppschool.betterCamTests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/betterCam.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/betterCam";
 			};
 			name = Release;
@@ -548,11 +759,15 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.ppschool.betterCamUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 				TEST_TARGET_NAME = betterCam;
 			};
 			name = Debug;
@@ -567,11 +782,15 @@
 				PRODUCT_BUNDLE_IDENTIFIER = com.ppschool.betterCamUITests;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				STRING_CATALOG_GENERATE_SYMBOLS = NO;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_EMIT_LOC_STRINGS = NO;
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
-				TARGETED_DEVICE_FAMILY = "1,2";
+				TARGETED_DEVICE_FAMILY = 1;
 				TEST_TARGET_NAME = betterCam;
 			};
 			name = Release;
@@ -579,6 +798,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		1A6C414B2F3732B600DCE6AB /* Build configuration list for PBXNativeTarget "BetterCamWidgetsExtension" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				1A6C414C2F3732B600DCE6AB /* Debug */,
+				1A6C414D2F3732B600DCE6AB /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 		1AB07E3E2F21F48200CBA2B6 /* Build configuration list for PBXProject "betterCam" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

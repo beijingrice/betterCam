@@ -60,6 +60,14 @@ extension View {
                         ), lineWidth: depth)
                         .blur(radius: 1)
                     
+                    RoundedRectangle(cornerRadius: cornerRadius)
+                        .stroke(LinearGradient(
+                            colors: [.black.opacity(0.8), .clear],
+                            startPoint: .topTrailing,
+                            endPoint: .center
+                        ), lineWidth: 1)
+                        .blur(radius: 1)
+                    
                     // 2. 右侧和下侧：微弱亮边（模拟切削面反光）
                     RoundedRectangle(cornerRadius: cornerRadius)
                         .stroke(LinearGradient(
@@ -77,40 +85,11 @@ extension View {
         self
             .padding(thickness)
             .background(
-                ZStack {
-                        // 1. 底色：使用深色调的钛灰色，这是“高级感”的基调
-                        Color(red: 0.50, green: 0.50, blue: 0.50)
-                        Canvas { context, size in
-                            // 增加到 4000 个噪点，模拟致密的表面
-                            for _ in 0...400000 {
-                                let x = Double.random(in: 0...size.width)
-                                let y = Double.random(in: 0...size.height)
-                                
-                                // 关键：尺寸要极小 (0.3 - 0.7)，营造精密感
-                                let dotSize = Double.random(in: 0.3...0.5)
-                                let opacity = Double.random(in: 0.1...0.15)
-                                
-                                context.fill(
-                                    Path(ellipseIn: CGRect(x: x, y: y, width: dotSize, height: dotSize)),
-                                    with: .color(.black.opacity(opacity))
-                                )
-                            }
-                        }
-                        .blendMode(.overlay) // 👈 关键：使用 overlay 让噪点与底色产生明暗交织，而不是简单的覆盖
-                        
-                        // 4. 金属闪烁层：模拟微小的金属晶体反光
-                        Canvas { context, size in
-                            for _ in 0...100000 {
-                                let x = Double.random(in: 0...size.width)
-                                let y = Double.random(in: 0...size.height)
-                                
-                                context.fill(
-                                    Path(ellipseIn: CGRect(x: x, y: y, width: 0.4, height: 0.4)),
-                                    with: .color(.white.opacity(0.15))
-                                )
-                            }
-                        }
-                    }
+                Image("camera_body_noise_darker")
+                    .resizable(resizingMode: .tile)
+                    .opacity(1.0)
+                    .blendMode(.overlay)
+                    .ignoresSafeArea()
             )
     }
     

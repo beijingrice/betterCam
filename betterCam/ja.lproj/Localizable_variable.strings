@@ -13,3 +13,7 @@
 "HIGH" = "高画質";
 "ON" = "オン";
 "OFF" = "オフ";
+"WAVEFORM" = "ウェーブフォーム";
+"HISTOGRAM" = "ヒストグラム";
+"ENABLE" = "有効化";
+"DISABLE" = "無効化";

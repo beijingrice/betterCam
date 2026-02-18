@@ -6,7 +6,7 @@
 //
 
 import SwiftUI
-
+/*
 struct BodyGrainLayer: View {
     // 💡 缓存生成的贴图，类似 Python 里的单例模式或对象池
     @State private var cachedGrainImage: Image? = nil
@@ -42,7 +42,7 @@ struct BodyGrainLayer: View {
             ZStack {
                 // 原有的黑点 Canvas
                 Canvas { context, size in
-                    for _ in 0...400000 {
+                    for _ in 0...400000 { // Draw black dots for 400000 times
                         let x = Double.random(in: 0...size.width)
                         let y = Double.random(in: 0...size.height)
                         let dotSize = Double.random(in: 0.3...0.5)
@@ -55,7 +55,7 @@ struct BodyGrainLayer: View {
                 }
                 // 原有的白点 Canvas
                 Canvas { context, size in
-                    for _ in 0...100000 {
+                    for _ in 0...100000 { // Draw white dots for 100000 times
                         let x = Double.random(in: 0...size.width)
                         let y = Double.random(in: 0...size.height)
                         context.fill(
@@ -79,3 +79,16 @@ struct BodyGrainLayer: View {
         }
     }
 }
+*/
+
+
+struct BodyGrainLayer: View {
+    var body: some View {
+        Image("camera_body_noise")
+            .resizable(resizingMode: .tile)
+            .opacity(1.0)
+            .blendMode(.overlay)
+            .ignoresSafeArea()
+    }
+}
+
