@@ -12,5 +12,7 @@ import SwiftUI
 struct BetterCamWidgetsBundle: WidgetBundle {
     var body: some Widget {
         BetterCamWidgetsControl()
+        
+        BetterCamHomeWidget()
     }
 }

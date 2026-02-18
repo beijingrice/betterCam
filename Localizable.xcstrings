@@ -1,6 +1,51 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "%lld -> %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld -> %2$lld"
+          }
+        }
+      }
+    },
+    "BetterCam" : {
+
+    },
+    "betterCam widget" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "betterCam ウィジェット"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "betterCam小组件"
+          }
+        }
+      }
+    },
+    "betterCam widget, shutter counts & quick launch." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "シャッター回数とクイック起動"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "betterCam小组件，实现快门计数和快速启动"
+          }
+        }
+      }
+    },
     "Buy me a cup of coffee" : {
       "localizations" : {
         "ja" : {
@@ -94,6 +139,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "关闭"
+          }
+        }
+      }
+    },
+    "COUNTS" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "枚"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "次"
           }
         }
       }
@@ -702,6 +763,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "谢谢你！"
+          }
+        }
+      }
+    },
+    "TOTAL %lld" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "累計"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "共计"
           }
         }
       }

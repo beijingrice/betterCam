@@ -1049,24 +1049,25 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     }
     
     private func saveImageDataToLibrary(_ data: Data, isRaw: Bool) {
+        ShutterManager.incrementShutter()
         PHPhotoLibrary.shared().performChanges({
-                let creationRequest = PHAssetCreationRequest.forAsset()
-                
-                if isRaw {
-                    // 💡 修复点：使用 PHAssetResourceCreationOptions 的正确方式
-                    let options = PHAssetResourceCreationOptions()
-                    // 确保 DNG 格式被正确识别，有些 iOS 版本需要通过 options 显式指定
-                    creationRequest.addResource(with: .photo, data: data, options: options)
-                } else {
-                    creationRequest.addResource(with: .photo, data: data, options: nil)
-                }
-            }) { success, error in
-                if success {
-                    print("✅ \(isRaw ? "RAW" : "JPEG") 保存成功")
-                } else if let error = error {
-                    print("❌ 保存失败: \(error.localizedDescription)")
-                }
+            let creationRequest = PHAssetCreationRequest.forAsset()
+            
+            if isRaw {
+                // 💡 修复点：使用 PHAssetResourceCreationOptions 的正确方式
+                let options = PHAssetResourceCreationOptions()
+                // 确保 DNG 格式被正确识别，有些 iOS 版本需要通过 options 显式指定
+                creationRequest.addResource(with: .photo, data: data, options: options)
+            } else {
+                creationRequest.addResource(with: .photo, data: data, options: nil)
             }
+        }) { success, error in
+            if success {
+                print("✅ \(isRaw ? "RAW" : "JPEG") 保存成功")
+            } else if let error = error {
+                print("❌ 保存失败: \(error.localizedDescription)")
+            }
+        }
     }
 }
 

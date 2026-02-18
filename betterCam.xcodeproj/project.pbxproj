@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		1A442D4F2F2BAEFE00EADEE3 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 1A442D4E2F2BAEFE00EADEE3 /* Localizable.xcstrings */; };
+		1A5DA7B02F4583B3003512B0 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 1A442D4E2F2BAEFE00EADEE3 /* Localizable.xcstrings */; };
 		1A6C41372F3732B500DCE6AB /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1A6C41362F3732B500DCE6AB /* WidgetKit.framework */; };
 		1A6C41392F3732B500DCE6AB /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1A6C41382F3732B500DCE6AB /* SwiftUI.framework */; };
 		1A6C414A2F3732B600DCE6AB /* BetterCamWidgetsExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 1A6C41342F3732B500DCE6AB /* BetterCamWidgetsExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
@@ -53,6 +54,7 @@
 
 /* Begin PBXFileReference section */
 		1A442D4E2F2BAEFE00EADEE3 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		1A5DA7A92F4574BC003512B0 /* BetterCamWidgetsExtension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = BetterCamWidgetsExtension.entitlements; sourceTree = "<group>"; };
 		1A6C41342F3732B500DCE6AB /* BetterCamWidgetsExtension.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = BetterCamWidgetsExtension.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		1A6C41362F3732B500DCE6AB /* WidgetKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = WidgetKit.framework; path = System/Library/Frameworks/WidgetKit.framework; sourceTree = SDKROOT; };
 		1A6C41382F3732B500DCE6AB /* SwiftUI.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = SwiftUI.framework; path = System/Library/Frameworks/SwiftUI.framework; sourceTree = SDKROOT; };
@@ -69,6 +71,13 @@
 			);
 			target = 1AB07E422F21F48200CBA2B6 /* betterCam */;
 		};
+		1A5DA7A72F45669E003512B0 /* Exceptions for "BetterCamWidgets" folder in "betterCam" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				BetterCamWidget.swift,
+			);
+			target = 1AB07E422F21F48200CBA2B6 /* betterCam */;
+		};
 		1A6C414E2F3732B600DCE6AB /* Exceptions for "BetterCamWidgets" folder in "BetterCamWidgetsExtension" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
@@ -80,6 +89,7 @@
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
 				CameraIntent.swift,
+				ShutterManager/ShutterManager.swift,
 			);
 			target = 1A6C41332F3732B500DCE6AB /* BetterCamWidgetsExtension */;
 		};
@@ -89,6 +99,7 @@
 		1A6C413A2F3732B500DCE6AB /* BetterCamWidgets */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			exceptions = (
+				1A5DA7A72F45669E003512B0 /* Exceptions for "BetterCamWidgets" folder in "betterCam" target */,
 				1A6C414E2F3732B600DCE6AB /* Exceptions for "BetterCamWidgets" folder in "BetterCamWidgetsExtension" target */,
 			);
 			path = BetterCamWidgets;
@@ -161,6 +172,7 @@
 		1AB07E3A2F21F48200CBA2B6 = {
 			isa = PBXGroup;
 			children = (
+				1A5DA7A92F4574BC003512B0 /* BetterCamWidgetsExtension.entitlements */,
 				1A442D4E2F2BAEFE00EADEE3 /* Localizable.xcstrings */,
 				1AB07E452F21F48200CBA2B6 /* betterCam */,
 				1AB07E532F21F48300CBA2B6 /* betterCamTests */,
@@ -332,6 +344,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				1A5DA7B02F4583B3003512B0 /* Localizable.xcstrings in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -414,6 +427,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = BetterCamWidgetsExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = QHSG8V3GKU;
@@ -448,6 +462,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_WIDGET_BACKGROUND_COLOR_NAME = WidgetBackground;
+				CODE_SIGN_ENTITLEMENTS = BetterCamWidgetsExtension.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = QHSG8V3GKU;
@@ -603,6 +618,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = betterCam/betterCam.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = QHSG8V3GKU;
@@ -645,6 +661,7 @@
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = betterCam/betterCam.entitlements;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = QHSG8V3GKU;

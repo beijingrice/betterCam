@@ -10,6 +10,12 @@ import AppIntents
 
 @main
 struct betterCamApp: App {
+    
+    init() {
+        ShutterManager.cleanupOldData()
+        ShutterManager.resetSession()
+    }
+    
     var body: some Scene {
         WindowGroup {
             ContentView()
