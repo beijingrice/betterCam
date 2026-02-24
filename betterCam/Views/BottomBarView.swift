@@ -21,8 +21,7 @@ struct BottomBarView: View {
                 ParameterItem(title: camera.ISO, index: UIWidgets.ISO.rawValue)
                 Spacer()
                 ParameterItem(title: camera.style, index: UIWidgets.Style.rawValue)
-            }
-            
+            } 
         }
         .frame(height: 40)
         .background(Color.black.opacity(0.5))

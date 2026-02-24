@@ -18,7 +18,7 @@ struct betterCamApp: App {
     
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentViewPortrait()
         }
     }
 }

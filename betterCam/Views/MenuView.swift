@@ -101,12 +101,16 @@ struct MenuView: View {
                     haptic(.medium)
                     DispatchQueue.main.async {
                         camera.enableFrontCamera = true
+                        camera.discoverCameras()
                     }
                 }
                 SegmentedButton(title: DISABLE, isSelected: !camera.enableFrontCamera) {
                     haptic(.medium)
                     DispatchQueue.main.async {
                         camera.enableFrontCamera = false
+                        camera.discoverCameras()
+                        camera.currentDeviceIndex = 0
+                        camera.switchCamera(direction: 0)
                     }
                 }
             }
@@ -234,61 +238,70 @@ struct MenuView: View {
     }
     
     var body: some View {
-        ZStack {
-            // 半透明背景，点击此处也可以增加关闭逻辑
-            Color.black.opacity(0.9)
-                .ignoresSafeArea()
-            
-            ScrollView(.vertical, showsIndicators: false) {
-                VStack(spacing: 20) {
-                    
-                    // 1. 顶部标题
-                    ZStack {
-                        HStack {
-                            cancelButton
-                                .padding(10)
-                            Spacer()
+        GeometryReader { geometry in
+            ZStack {
+                // 半透明背景，点击此处也可以增加关闭逻辑
+                Color.black.opacity(0.9)
+                    .ignoresSafeArea()
+                
+                ScrollView(.vertical, showsIndicators: false) {
+                    VStack(spacing: 20) {
+                        
+                        // 1. 顶部标题
+                        ZStack {
+                            HStack {
+                                cancelButton
+                                    .padding(10)
+                                Spacer()
+                            }
+                            headerSection
                         }
-                        headerSection
+                        
+                        // 2. 预览分辨率选择
+                        previewResSection
+                        
+                        // 3. 波形图开关
+                        // MenuView.swift 中的波形图部分
+                        waveFormHistogramSection
+                        
+                        enableFrontCameraOrNotSection
+                        
+                        shutterSoundSection
+                        
+                        saveSSandISOsection
+                        
+                        preferAUTOsection
+                        
+                        if !camera.doneTheTip {
+                            moneyONEGAIsection // かわいいからお金お願いします〜
+                        }
+                        
+                        Spacer()
+                        
+                        // 4. 关键修正：关闭按钮
+                        // 采用最高的优先级，物理反馈优先于状态变更
+                        
                     }
-                    
-                    // 2. 预览分辨率选择
-                    previewResSection
-                    
-                    // 3. 波形图开关
-                    // MenuView.swift 中的波形图部分
-                    waveFormHistogramSection
-                    
-                    enableFrontCameraOrNotSection
-                    
-                    shutterSoundSection
-                    
-                    saveSSandISOsection
-                    
-                    preferAUTOsection
-                    
-                    if !camera.doneTheTip {
-                        moneyONEGAIsection // かわいいからお金お願いします〜
-                    }
-                    
-                    Spacer()
-                    
-                    // 4. 关键修正：关闭按钮
-                    // 采用最高的优先级，物理反馈优先于状态变更
-                    
+                    .padding(30)
                 }
-                .padding(30)
             }
-        }
-        .alert("Oh, yeah! You have already donated me! Thank you!", isPresented: $showRestoredMsg) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("Thank you!")
-        }
-        .alert("Thank you!", isPresented: $showThanksAlert) {
-            Button("OK", role: .cancel) {}
-        } message: {
-            Text("Thank you!")
+            .statusBar(hidden: true)
+            .rotationEffect(.degrees(90))
+            // 2. 关键：旋转后，由于是在 Portrait 容器里，
+            // 我们需要手动把宽度设为屏幕的高度，高度设为屏幕的宽度
+            .frame(width: geometry.size.height, height: geometry.size.width)
+            // 3. 将视图居中对齐
+            .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
+            .alert("Oh, yeah! You have already donated me! Thank you!", isPresented: $showRestoredMsg) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Thank you!")
+            }
+            .alert("Thank you!", isPresented: $showThanksAlert) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Thank you!")
+            }
         }
     }
     

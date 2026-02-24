@@ -145,12 +145,12 @@ struct KnurledDialView: View {
                 // 6. 步进逻辑：每 30 度触发反馈并切换参数
                 hapticAccumulator += deltaInDegrees
                 if abs(hapticAccumulator) >= stepDegrees {
+                    triggerFeedback()
                     if hapticAccumulator > 0 {
                         camera.changeParameter(direction: 1)
                     } else {
                         camera.changeParameter(direction: -1)
                     }
-                    triggerFeedback()
                     // 这种写法支持快速旋转时连续触发
                     hapticAccumulator = hapticAccumulator.truncatingRemainder(dividingBy: stepDegrees)
                 }

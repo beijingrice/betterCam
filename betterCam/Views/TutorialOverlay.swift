@@ -9,42 +9,51 @@ import SwiftUI
 
 struct TutorialOverlay: View {
     @ObservedObject var camera: Camera
-    
-    // 教学步骤控制
-    @State private var currentStep: Int = 1 // 1: 手势与LUT说明, 2: 拨盘与快门说明
+    @State private var currentStep: Int = 1
     
     // 动画状态
     @State private var offsetH: CGFloat = -15
     @State private var offsetV: CGFloat = 15
-    @State private var dialRotation: Double = 0
-    @State private var shutterPulse: CGFloat = 1.0
     
     var body: some View {
-        ZStack {
-            Color.black.opacity(0.8)
-                .ignoresSafeArea()
+        GeometryReader { geo in
+            // 获取物理屏幕的宽高
+            let screenW = geo.size.width
+            let screenH = geo.size.height
             
-            if currentStep == 1 {
-                // --- 第一阶段：原有的手势与LUT说明 ---
-                mainInfoView
-                    .transition(.asymmetric(insertion: .opacity, removal: .move(edge: .leading)))
-            } else {
-                // --- 第二阶段：拨盘、中键与快门动画教学 ---
-                dialAndShutterView
-                    .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .opacity))
+            ZStack {
+                Color.black.opacity(0.8)
+                    .ignoresSafeArea()
+                
+                // 关键点：创建一个固定尺寸的容器，其尺寸是反向的
+                // 旋转后，这个容器会正好填满竖屏
+                Group {
+                    if currentStep == 1 {
+                        mainInfoView
+                            .transition(.asymmetric(insertion: .opacity, removal: .move(edge: .leading)))
+                    } else {
+                        dialAndShutterView
+                            .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .opacity))
+                    }
+                }
+                .frame(width: screenH, height: screenW) // 交换宽高
+                .rotationEffect(.degrees(90))           // 顺时针旋转90度
+                .offset(x: -(screenW / 4))
             }
+            .frame(width: screenW, height: screenH)
         }
         .preferredColorScheme(.dark)
     }
-    
-    // MARK: - 第一阶段视图 (手势与LUT)
+
+    // MARK: - 第一阶段视图
     private var mainInfoView: some View {
-        HStack(spacing: 30) {
+        HStack(spacing: 40) {
             VStack(spacing: 25) {
                 Text("In camera screen:")
                     .font(.title3.bold())
                 gestureSection(icon: "hand.draw.fill", text: "Swipe horizontally for Profile Intensity", offset: offsetH, isHorizontal: true)
                 gestureSection(icon: "hand.draw.fill", text: "Swipe vertically for Grain", offset: offsetV, isHorizontal: false)
+                
                 nextButton(label: "Got it") {
                     withAnimation(.spring()) { currentStep = 2 }
                 }
@@ -54,7 +63,7 @@ struct TutorialOverlay: View {
             lutInfoSection
                 .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(40)
+        .padding(.horizontal, 60)
         .onAppear {
             withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
                 offsetH = 15
@@ -62,44 +71,42 @@ struct TutorialOverlay: View {
             }
         }
     }
-    
-    // MARK: - 第二阶段视图 (拨盘与快门)
+
+    // MARK: - 第二阶段视图
     private var dialAndShutterView: some View {
-        HStack(spacing: 50) {
-            // 左侧：拨盘说明
-            VStack(spacing: 30) {
+        HStack(spacing: 60) {
+            // 左侧：拨盘
+            VStack(spacing: 20) {
                 Text("Physical Control:")
                     .font(.title3.bold())
                 
-                // 模拟拨盘旋转动画
-                ZStack {
-                    KnurledDialView()
-                        .allowsHitTesting(false)
-                }
+                KnurledDialView() // 假设你已有此组件
+                    .allowsHitTesting(false)
+                    .frame(height: 120)
+                    .padding(.vertical, 40)
                 
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .center, spacing: 4) {
                     Text("Rotate the dial to switch items")
                     Text("Press center to select")
                 }
                 .font(.subheadline)
             }
             .frame(maxWidth: .infinity)
-            
-            // 右侧：快门说明
-            VStack(spacing: 30) {
+
+            // 右侧：快门
+            VStack(spacing: 20) {
                 Text("Capture:")
                     .font(.title3.bold())
                 
-                // 快门按钮动画
-                ShutterButtonView()
+                ShutterButtonView() // 假设你已有此组件
                     .allowsHitTesting(false)
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Press the shutter button to shoot.")
-                }
-                .font(.subheadline)
+                    .frame(height: 120)
+
+                Text("Press the shutter button to shoot.")
+                    .font(.subheadline)
                 
-                Spacer()
-                
+                Spacer().frame(height: 20)
+
                 nextButton(label: "Start Shooting") {
                     withAnimation(.easeInOut(duration: 0.5)) {
                         camera.hasCompletedTutorial = true
@@ -109,17 +116,7 @@ struct TutorialOverlay: View {
             }
             .frame(maxWidth: .infinity)
         }
-        .padding(40)
-        .onAppear {
-            // 拨盘旋转动画
-            withAnimation(.linear(duration: 4).repeatForever(autoreverses: false)) {
-                dialRotation = 360
-            }
-            // 快门/中键点击动画
-            withAnimation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true)) {
-                shutterPulse = 0.8
-            }
-        }
+        .padding(.horizontal, 60)
     }
     
     // MARK: - 辅助组件
@@ -172,4 +169,8 @@ struct TutorialOverlay: View {
         }
         .font(.subheadline)
     }
+}
+
+#Preview {
+    TutorialOverlay(camera: Camera())
 }

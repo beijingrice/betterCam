@@ -18,80 +18,89 @@ struct LUTManagerView: View {
     @State private var showFilePicker = false
     
     var body: some View {
-        NavigationStack {
-            List {
-                Section(header: Text("My LUTs")) {
-                    // 假设 FilmEngine.shared.availableSimulations 存储了所有 LUT
-                    ForEach(engine.availableSimulations, id: \.name) { lut in
-                        HStack {
-                            Text(lut.name)
-                            Spacer()
-                        }
-                        .swipeActions(edge: .trailing) {
-                            if lut.type != .builtIn && lut.type != .builtInLut {
-                                Button(role: .destructive) {
-                                    // 执行删除逻辑
-                                    deleteLUT(lut)
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
+        GeometryReader { geometry in
+            NavigationStack {
+                List {
+                    Section(header: Text("My LUTs")) {
+                        // 假设 FilmEngine.shared.availableSimulations 存储了所有 LUT
+                        ForEach(engine.availableSimulations, id: \.name) { lut in
+                            HStack {
+                                Text(lut.name)
+                                Spacer()
+                            }
+                            .swipeActions(edge: .trailing) {
+                                if lut.type != .builtIn && lut.type != .builtInLut {
+                                    Button(role: .destructive) {
+                                        // 执行删除逻辑
+                                        deleteLUT(lut)
+                                    } label: {
+                                        Label("Delete", systemImage: "trash")
+                                    }
+                                    
+                                    Button {
+                                        // 执行重命名弹窗逻辑
+                                        renameLUT(lut)
+                                    } label: {
+                                        Label("Rename", systemImage: "pencil")
+                                    }
+                                    .tint(.orange)
                                 }
-                                
-                                Button {
-                                    // 执行重命名弹窗逻辑
-                                    renameLUT(lut)
-                                } label: {
-                                    Label("Rename", systemImage: "pencil")
-                                }
-                                .tint(.orange)
                             }
                         }
                     }
+                    
+                    Section {
+                        Button(action: {
+                            showFilePicker = true
+                        }) {
+                            Label("Import New LUT (.cube)", systemImage: "plus")
+                        }
+                    }
+                    
                 }
-                
-                Section {
-                    Button(action: {
-                        showFilePicker = true
-                    }) {
-                        Label("Import New LUT (.cube)", systemImage: "plus")
+                .navigationTitle("LUTs management")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("Done") {
+                            camera.inCameraView = true
+                            dismiss()
+                        }
                     }
                 }
-                
-            }
-            .navigationTitle("LUTs management")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Done") {
-                        camera.inCameraView = true
-                        dismiss()
+                .fileImporter(isPresented: $showFilePicker, allowedContentTypes: [.item], allowsMultipleSelection: false) { result in
+                    handleFileImport(result: result)
+                }
+                .alert("Rename LUT", isPresented: $isShowingRenameAlert) {
+                    TextField("Enter new name", text: $newNameText)
+                    
+                    Button("Cancel", role: .cancel) {
+                        lutToRename = nil
+                        newNameText = ""
                     }
-                }
-            }
-            .fileImporter(isPresented: $showFilePicker, allowedContentTypes: [.item], allowsMultipleSelection: false) { result in
-                handleFileImport(result: result)
-            }
-            .alert("Rename LUT", isPresented: $isShowingRenameAlert) {
-                TextField("Enter new name", text: $newNameText)
-                
-                Button("Cancel", role: .cancel) {
-                    lutToRename = nil
-                    newNameText = ""
-                }
-                
-                Button("OK") {
-                    if let oldLut = lutToRename, !newNameText.isEmpty {
-                        // 调用你 FilmEngine 里的重命名逻辑
-                        FilmEngine.shared.renameSimulation(oldName: oldLut.name, newName: newNameText)
-                        
-                        // 刷新 Camera 中的 styleOptions 列表，确保相机转盘同步更新
-                        camera.syncAllLUTsToOptions()
+                    
+                    Button("OK") {
+                        if let oldLut = lutToRename, !newNameText.isEmpty {
+                            // 调用你 FilmEngine 里的重命名逻辑
+                            FilmEngine.shared.renameSimulation(oldName: oldLut.name, newName: newNameText)
+                            
+                            // 刷新 Camera 中的 styleOptions 列表，确保相机转盘同步更新
+                            camera.syncAllLUTsToOptions()
+                        }
+                        lutToRename = nil
+                        newNameText = ""
                     }
-                    lutToRename = nil
-                    newNameText = ""
+                } message: {
+                    Text("Please enter a new name for this LUT.")
                 }
-            } message: {
-                Text("Please enter a new name for this LUT.")
             }
+            .statusBar(hidden: true)
+            .rotationEffect(.degrees(90))
+            // 2. 关键：旋转后，由于是在 Portrait 容器里，
+            // 我们需要手动把宽度设为屏幕的高度，高度设为屏幕的宽度
+            .frame(width: geometry.size.height, height: geometry.size.width)
+            // 3. 将视图居中对齐
+            .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
         }
     }
     

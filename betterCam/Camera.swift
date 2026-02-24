@@ -15,6 +15,7 @@ import CoreMotion
 import UIKit
 import Metal
 import MetalKit
+import WidgetKit
 
 enum CameraPermissionStatus {
     case undetermined  // 尚未询问
@@ -55,7 +56,7 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     
     @Published var enableFrontCamera: Bool = false {
         didSet {
-            discoverCameras()
+            //discoverCameras()
         }
     }
     
@@ -170,6 +171,7 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
         startDeviceMotion()
         syncAllLUTsToOptions()
         getEquivalentFocalLength()
+        updateApertureInfo()
     }
     
     override init() {
@@ -200,12 +202,7 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     
     @Published var isCapturing: Bool = false
     @Published var availableDevices: [AVCaptureDevice] = []
-    @Published var currentDeviceIndex: Int = 0 {
-        didSet {
-            setupLightMeter()
-            getEquivalentFocalLength()
-        }
-    }
+    @Published var currentDeviceIndex: Int = 0
     
     deinit {
         exposureOffsetObserver?.invalidate()
@@ -275,6 +272,8 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     @AppStorage("enablePermanentParameterStorage") var enablePermanentParameterStorage: Bool = false
     @AppStorage("perferAUTO") var perferAUTO: Bool = false
     
+    let prefs = UserDefaults(suiteName: "group.com.rice.betterCam")
+    
     func updateParameterToStorage() {
         print("PermanentParameterStorageEnabled?", enablePermanentParameterStorage)
         if enablePermanentParameterStorage {
@@ -285,6 +284,12 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
                 print("Saved ISO:", savedISO) // FOR DEBUG
             }
         }
+        prefs?.set(SS, forKey: "last_SS")
+        prefs?.set(ISO, forKey: "last_ISO")
+        let ss = prefs?.string(forKey: "last_SS") ?? "NONE"
+        let iso = prefs?.string(forKey: "last_ISO") ?? "NONE"
+        print("Saved for Widgets: \(ss) \(iso)")
+        WidgetCenter.shared.reloadAllTimelines()
     }
     
     func loadParameterFromStorage() {
@@ -292,6 +297,9 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
         if UserDefaults.standard.bool(forKey: "perferAUTO") {
             self.SS = "AUTO"
             self.ISO = "AUTO"
+            prefs?.set(SS, forKey: "last_SS")
+            prefs?.set(ISO, forKey: "last_ISO")
+            WidgetCenter.shared.reloadAllTimelines()
             isRestoring = false
             return
         }
@@ -380,17 +388,27 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     private let motionManager = CMMotionManager()
     private var deviceOrientation: AVCaptureVideoOrientation = .portrait
     
-    func getEquivalentFocalLength() {
-        guard availableDevices.indices.contains(currentDeviceIndex) else { return }
-        let device = availableDevices[currentDeviceIndex]
-        
-        // 1. 获取原始计算值
-        let hFOV = device.activeFormat.videoFieldOfView
+    func getFocalLengthByIndex(idx: Int, camList: [AVCaptureDevice]) -> Int {
+        guard camList.indices.contains(idx) else {
+            print("ERROR! Camera index that not exist!")
+            return 0
+        }
+        let device = camList[idx]
+        print("Now calculating focal length for device:", device)
+        let baseFormat = device.formats.first { format in
+            let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+            // 寻找比例接近 1.33 (4:3) 且分辨率够高的格式
+            return Double(dims.width) / Double(dims.height) < 1.5
+        } ?? device.activeFormat
+        let hFOV = baseFormat.videoFieldOfView
+        //let hFOV = device.activeFormat.videoFieldOfView
+        print("hFOV is:", hFOV)
         let radians = hFOV * Float.pi / 180.0
         var calculatedEquivalent = 36.0 / (2.0 * tan(radians / 2.0))
+        print("\(calculatedEquivalent)mm")
         
         if device.deviceType == .builtInUltraWideCamera {
-            if Int(round(calculatedEquivalent)) == 14 {
+            if calculatedEquivalent >= 13 && calculatedEquivalent <= 15 {
                 calculatedEquivalent = 13
             }
         }
@@ -402,8 +420,10 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
             if calculatedEquivalent > 23 && calculatedEquivalent < 28 {
                 // 这里可以根据你的 iPhone 15/16 Pro 经验，如果是 27 左右就显示 26
                 if calculatedEquivalent > 26.5 {
+                    print(calculatedEquivalent)
                     calculatedEquivalent = 26
                 } else {
+                    print(calculatedEquivalent)
                     calculatedEquivalent = 24
                 }
             }
@@ -414,9 +434,14 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
         if device.deviceType == .builtInTelephotoCamera {
             if calculatedEquivalent > 70 && calculatedEquivalent < 80 { calculatedEquivalent = 72 }
             if calculatedEquivalent > 110 && calculatedEquivalent < 125 { calculatedEquivalent = 120 }
+            if calculatedEquivalent > 95 && calculatedEquivalent < 105 { calculatedEquivalent = 100 }
         }
         
-        self.currentFocalLength = Int(round(calculatedEquivalent))
+        return Int(round(calculatedEquivalent))
+    }
+    
+    func getEquivalentFocalLength() {
+        self.currentFocalLength = getFocalLengthByIndex(idx: currentDeviceIndex, camList: availableDevices)
     }
 
         // 在 init 中启动监测
@@ -485,7 +510,6 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
         }
     }
     
-    
     func discoverCameras() {
         // 将 position 设置为 .unspecified 可以搜索到所有方向的镜头
         let discoverySession = AVCaptureDevice.DiscoverySession(
@@ -498,13 +522,42 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
             position: .unspecified // 💡 修改点：允许前置和后置
         )
         
+        var tempList: [AVCaptureDevice] = []
         // 如果你只想在特定条件下显示前置，可以在这里过滤
         if enableFrontCamera {
-            self.availableDevices = discoverySession.devices
+            tempList = discoverySession.devices
         } else {
             // 仅保留后置镜头
-            self.availableDevices = discoverySession.devices.filter { $0.position == .back }
+            tempList = discoverySession.devices.filter { $0.position == .back }
         }
+        
+        tempList = discoverySession.devices.filter { $0.position == .back }
+        let decorated = tempList.enumerated().map { (offset, device) in
+            let focalLength = getFocalLengthByIndex(idx: offset, camList: tempList)
+            return (device, focalLength)
+        }
+        // 2. 排序：基于元组中的焦距进行从小到大排序
+        let sortedDecorated = decorated.sorted { $0.1 < $1.1 }
+        // 3. 还原：将排序后的设备重新赋值回 tempList
+        tempList = sortedDecorated.map { $0.0 }
+        if enableFrontCamera {
+            print(tempList.indices.contains(currentDeviceIndex + 1))
+            
+            tempList.insert(contentsOf: discoverySession.devices.filter{ $0.position == .front }, at: 0)
+            if tempList.indices.contains(currentDeviceIndex + 1) {
+                print("+1")
+                currentDeviceIndex += 1
+            }
+        }
+        
+        self.availableDevices = tempList
+        print("--------------DEBUG!")
+        
+        print(currentDeviceIndex, "       ", availableDevices[currentDeviceIndex])
+        print(availableDevices)
+        
+        print("--------------DEBUG!")
+        
         print("Available camera counts:", self.availableDevices.count)
     }
     
@@ -531,6 +584,9 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
                 // 💡 关键：切换后立即更新光圈显示和 SS/ISO 可用范围
                 self.actualSSoptions = self.SSoptions.supportedSS(for: newDevice)
                 self.actualISOoptions = self.ISOoptions.supportedISO(for: newDevice).formattedISOoptions()
+                if !actualISOoptions.contains(ISO) {
+                    ISO = actualISOoptions[actualISOoptions.count - 1]
+                }
                 updateExposure()
             }
         } catch {
@@ -538,6 +594,8 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
         }
         session.commitConfiguration()
         self.updateApertureInfo()
+        self.getEquivalentFocalLength()
+        self.setupLightMeter()
     }
     
     func applyResolutionSettings() {
@@ -610,6 +668,9 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
         }
     }
     
+    var videoDevice: AVCaptureDevice?
+    private var apertureObserver: NSKeyValueObservation?
+    
     func setupSession() {
         guard !availableDevices.isEmpty else { return }
         session.beginConfiguration()
@@ -650,17 +711,7 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
             
-            // 1. 开启 Session
             self.session.startRunning()
-            
-            // 2. 检查 Session 是否成功运行
-            if self.session.isRunning {
-                // 💡 3. 延迟 0.1-0.2 秒读取。这是针对 iPhone 16/17 Pro 处理延迟的“玄学补丁”
-                // 此时硬件已经开始输出预览流，寄存器里的光圈值已经更新
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                    self.updateApertureInfo()
-                }
-            }
         }
     }
     
@@ -1038,7 +1089,7 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
                 let cleanISO = ISO.replacingOccurrences(of: "ISO ", with: "")
                 let isoValue = Float(cleanISO) ?? 100.0
                 
-                device.setExposureModeCustom(duration: duration, iso: isoValue, completionHandler: nil)
+                device.setExposureModeCustom(duration: duration, iso: isoValue, completionHandler: nil) // TODO: Check ISO value
                 
             }
             
