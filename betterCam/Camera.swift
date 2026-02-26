@@ -156,6 +156,8 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
         }
     }
     
+    var firstTimeCallingDiscoverCameras: Bool = true
+    
     func callAllStartupFuncs() {
         setupMetal()
         setupTextureCache()
@@ -551,14 +553,14 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
         }
         
         self.availableDevices = tempList
-        print("--------------DEBUG!")
-        
-        print(currentDeviceIndex, "       ", availableDevices[currentDeviceIndex])
-        print(availableDevices)
-        
-        print("--------------DEBUG!")
-        
-        print("Available camera counts:", self.availableDevices.count)
+        if firstTimeCallingDiscoverCameras {
+            firstTimeCallingDiscoverCameras = false
+            for cam in self.availableDevices {
+                if cam.deviceType == .builtInWideAngleCamera {
+                    currentDeviceIndex = self.availableDevices.firstIndex(of: cam) ?? 0
+                }
+            }
+        }
     }
     
     func switchCamera(direction: Int) {
@@ -586,6 +588,9 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
                 self.actualISOoptions = self.ISOoptions.supportedISO(for: newDevice).formattedISOoptions()
                 if !actualISOoptions.contains(ISO) {
                     ISO = actualISOoptions[actualISOoptions.count - 1]
+                }
+                if !actualSSoptions.contains(SS) {
+                    SS = actualSSoptions[actualSSoptions.count - 1]
                 }
                 updateExposure()
             }

@@ -239,10 +239,10 @@ struct MenuView: View {
     
     var body: some View {
         GeometryReader { geometry in
+            Color.black
+                .ignoresSafeArea()
             ZStack {
                 // 半透明背景，点击此处也可以增加关闭逻辑
-                Color.black.opacity(0.9)
-                    .ignoresSafeArea()
                 
                 ScrollView(.vertical, showsIndicators: false) {
                     VStack(spacing: 20) {
