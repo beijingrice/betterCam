@@ -10,6 +10,7 @@ import Combine
 
 class StoreManager: ObservableObject {
     @Published var products: [Product] = []
+    @Published var isPurchasing: Bool = false
     var updateListenerTask: Task<Void, Error>? = nil // 持有引用
     
     init() {
@@ -49,6 +50,9 @@ class StoreManager: ObservableObject {
     // 执行购买
     func purchase() async -> Bool {
         guard let product = products.first else { print("?"); return false }
+        
+        isPurchasing = true
+        defer { isPurchasing = false }
         
         do {
             let result = try await product.purchase()

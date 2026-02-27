@@ -194,7 +194,11 @@ struct MenuView: View {
                 }
             }) {
                 HStack {
-                    Image(systemName: "cup.and.saucer.fill")
+                    if storeManager.isPurchasing {
+                        ProgressView().tint(.yellow)
+                    } else {
+                        Image(systemName: "cup.and.saucer.fill")
+                    }
                     Text("Buy me a cup of coffee!")
                         .font(.system(size: 14, weight: .bold, design: .monospaced))
                     Spacer()
@@ -294,13 +298,9 @@ struct MenuView: View {
             .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
             .alert("Oh, yeah! You have already donated me! Thank you!", isPresented: $showRestoredMsg) {
                 Button("OK", role: .cancel) {}
-            } message: {
-                Text("Thank you!")
             }
             .alert("Thank you!", isPresented: $showThanksAlert) {
                 Button("OK", role: .cancel) {}
-            } message: {
-                Text("Thank you!")
             }
         }
     }
