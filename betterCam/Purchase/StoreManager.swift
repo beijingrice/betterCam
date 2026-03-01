@@ -13,9 +13,14 @@ class StoreManager: ObservableObject {
     @Published var isPurchasing: Bool = false
     var updateListenerTask: Task<Void, Error>? = nil // 持有引用
     
+    @Published var hasPurchased: Bool = false
+
+    // 在 init 中增加：
+    
     init() {
         updateListenerTask = listenForTransactions()
-        Task {
+        // 使用 Detached Task 并设置较高优先级
+        Task(priority: .userInitiated) {
             await fetchProducts()
         }
     }
@@ -49,10 +54,28 @@ class StoreManager: ObservableObject {
     
     // 执行购买
     func purchase() async -> Bool {
-        guard let product = products.first else { print("?"); return false }
-        
         isPurchasing = true
         defer { isPurchasing = false }
+        
+        var retryCount = 0
+            let maxRetries = 3 // 最多尝试 3 次
+            
+            while products.isEmpty && retryCount < maxRetries {
+                print("⚠️ 尝试获取商品信息... 第 \(retryCount + 1) 次")
+                await fetchProducts() // 调用你原有的获取方法
+                
+                if products.isEmpty {
+                    // 如果还没拿到，等待 1 秒（给 App Store 服务器一点响应时间）
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    retryCount += 1
+                }
+            }
+            
+            // 3. 经过重试后再次检查
+        guard let product = products.first else {
+            print("❌ 经过重试仍无法获取商品，请检查网络或内购配置")
+            return false
+        }
         
         do {
             let result = try await product.purchase()

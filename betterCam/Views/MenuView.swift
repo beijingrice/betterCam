@@ -9,7 +9,9 @@ import StoreKit
 
 struct MenuView: View {
     @ObservedObject var camera: Camera
-    @StateObject private var storeManager = StoreManager()
+    
+    @EnvironmentObject var storeManager: StoreManager
+    
     @State private var showThanksAlert: Bool = false
     @State private var showRestoredMsg: Bool = false
     

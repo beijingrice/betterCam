@@ -11,6 +11,8 @@ import AppIntents
 @main
 struct betterCamApp: App {
     
+    @StateObject private var storeManager = StoreManager()
+    
     init() {
         ShutterManager.cleanupOldData()
         ShutterManager.resetSession()
@@ -19,6 +21,7 @@ struct betterCamApp: App {
     var body: some Scene {
         WindowGroup {
             ContentViewPortrait()
+                .environmentObject(storeManager)
         }
     }
 }

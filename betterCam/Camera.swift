@@ -818,7 +818,14 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
                         AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else { return }
             do {
                 try device.lockForConfiguration()
-                device.focusMode = mode
+                //device.focusMode = mode
+                
+                if device.isFocusModeSupported(mode) {
+                    device.focusMode = mode
+                } else {
+                    print("Unsupported focus mode!")
+                }
+                
                 device.unlockForConfiguration()
             } catch {
                 // Do nothing
