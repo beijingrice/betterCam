@@ -6,7 +6,25 @@
 //
 
 import Foundation
+import AVFoundation
 extension Camera {
+    
+    func manageSession() {
+        sessionQueue.async {
+            [weak self] in
+            guard let self = self else { return }
+            if !inCameraView {
+                if self.session.isRunning {
+                    self.session.stopRunning()
+                }
+            } else {
+                if !self.session.isRunning {
+                    self.session.startRunning()
+                }
+            }
+        }
+    }
+    
     func changeParameter(direction: Int) {
         /*
          activeIndex: 0...maxWidgetIndex + 1
@@ -78,5 +96,57 @@ extension Camera {
             nextIndex = options.count - 1
         }
         return options[nextIndex]
+    }
+}
+
+extension Array where Element == String {
+    func supportedISO(for device: AVCaptureDevice) -> [String] {
+        let maxISO = device.activeFormat.maxISO
+        let minISO = device.activeFormat.minISO
+        
+        return self.filter {
+            if $0 == "AUTO" { return true }
+            guard let val = Float($0) else { return false }
+            return val >= minISO && val <= maxISO
+        }
+    }
+    
+    func supportedSS(for device: AVCaptureDevice) -> [String] {
+        let minSeconds = CMTimeGetSeconds(device.activeFormat.minExposureDuration)
+        let maxSeconds = CMTimeGetSeconds(device.activeFormat.maxExposureDuration)
+        
+        return self.filter {
+            if $0 == "AUTO" { return true }
+            
+            // 💡 修复点：调用一个自定义转换函数，支持处理 "/" 符号
+            guard let val = parseShutterSpeedToDouble($0) else { return false }
+            
+            // 浮点数比较建议加一个极小的余量（epsilon），防止精度误差
+            return val >= (minSeconds - 0.00001) && val <= (maxSeconds + 0.00001)
+        }
+    }
+    
+    func formattedISOoptions() -> [String] {
+        return self.map {
+            isoItem in Int(isoItem) != nil ? "ISO \(isoItem)" : isoItem
+        }
+    }
+
+    // 辅助函数：把 "1/100" 转为 0.01
+    private func parseShutterSpeedToDouble(_ string: String) -> Double? {
+        if let doubleValue = Double(string) {
+            return doubleValue // 处理 "1", "0.8" 等直接数值
+        }
+        
+        // 处理 "1/100" 这种分数格式
+        let components = string.components(separatedBy: "/")
+        if components.count == 2,
+           let numerator = Double(components[0]),
+           let denominator = Double(components[1]),
+           denominator != 0 {
+            return numerator / denominator
+        }
+        
+        return nil
     }
 }

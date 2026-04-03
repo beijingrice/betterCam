@@ -54,7 +54,7 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     private var exposureOffsetObserver: NSKeyValueObservation?
     private var smoothedOffset: Float = 0.0 // 💡 用于平滑存储
     private var lastUpdateTimestamp: TimeInterval = 0
-    private let sessionQueue = DispatchQueue(label: "com.betterCam.sessionQueue")
+    let sessionQueue = DispatchQueue(label: "com.betterCam.sessionQueue")
     
     @Published var cameraPermission: CameraPermissionStatus = .undetermined
     @Published var photoPermission: CameraPermissionStatus = .undetermined
@@ -88,18 +88,7 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     @Published var exposureIndicatorMode: ExposureMode = .off
     @Published var isShowingMenu = false {
         didSet {
-            sessionQueue.async { [weak self] in
-                guard let self = self else { return }
-                if !inCameraView {
-                    if self.session.isRunning {
-                        self.session.stopRunning()
-                    }
-                } else {
-                    if !self.session.isRunning {
-                        self.session.startRunning()
-                    }
-                }
-            }
+            manageSession()
         }
     }
 
@@ -142,8 +131,6 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
         applyResolutionSettings()
         startDeviceMotion()
         syncAllLUTsToOptions()
-        getEquivalentFocalLength()
-        updateApertureInfo()
     }
     
     override init() {
@@ -157,22 +144,13 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     
     @Published var inCameraView: Bool = true {
         didSet {
-            sessionQueue.async { [weak self] in
-                guard let self = self else { return }
-                if !inCameraView {
-                    if self.session.isRunning {
-                        self.session.stopRunning()
-                    }
-                } else {
-                    if !self.session.isRunning {
-                        self.session.startRunning()
-                    }
-                }
-            }
+            manageSession()
         }
     }
     
     @Published var isCapturing: Bool = false
+    
+    // MARK: lens management here!
     @Published var availableDevices: [AVCaptureDevice] = []
     @Published var currentDeviceIndex: Int = 0
     
@@ -288,7 +266,6 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
         isRestoring = false
     }
     
-    // TODO: Add a permanent storage for parameters
     @Published var SS: String = "1/200" {
         didSet {
             guard !isRestoring else { return }
@@ -305,11 +282,8 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
             guard !isRestoring else { return }
             autoAmode(nowBeingControlled: "ISO")
             updateExposure()
-            // updateParameterToStorage()
         }
     }
-    // var styleOptions: [String] = ["STD", "RICH", "NOSTALGIC", "BW", "MANAGE"]
-    // TODO: Change it back after ADD function is ready
     var styleOptions: [String] = []
     var AFModeOptions: [String] = ["AF-C", "AF-S"]
     @Published var style: String = "STD"
@@ -355,62 +329,6 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     
     private let motionManager = CMMotionManager()
     private var deviceOrientation: AVCaptureVideoOrientation = .portrait
-    
-    func getFocalLengthByIndex(idx: Int, camList: [AVCaptureDevice]) -> Int {
-        guard camList.indices.contains(idx) else {
-            print("ERROR! Camera index that not exist!")
-            return 0
-        }
-        let device = camList[idx]
-        print("Now calculating focal length for device:", device)
-        let baseFormat = device.formats.first { format in
-            let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
-            // 寻找比例接近 1.33 (4:3) 且分辨率够高的格式
-            return Double(dims.width) / Double(dims.height) < 1.5
-        } ?? device.activeFormat
-        let hFOV = baseFormat.videoFieldOfView
-        //let hFOV = device.activeFormat.videoFieldOfView
-        print("hFOV is:", hFOV)
-        let radians = hFOV * Float.pi / 180.0
-        var calculatedEquivalent = 36.0 / (2.0 * tan(radians / 2.0))
-        print("\(calculatedEquivalent)mm")
-        
-        if device.deviceType == .builtInUltraWideCamera {
-            if calculatedEquivalent >= 13 && calculatedEquivalent <= 15 {
-                calculatedEquivalent = 13
-            }
-        }
-        
-        // 2. 针对主摄进行硬校准
-        // iPhone 主摄在预览流下算出来常为 26.8-27.2，但在全像素下是 24 或 26
-        if device.deviceType == .builtInWideAngleCamera {
-            // 根据不同机型微调，通常主摄强制归位到 24 或 26 看起来最自然
-            if calculatedEquivalent > 23 && calculatedEquivalent < 28 {
-                // 这里可以根据你的 iPhone 15/16 Pro 经验，如果是 27 左右就显示 26
-                if calculatedEquivalent > 26.5 {
-                    print(calculatedEquivalent)
-                    calculatedEquivalent = 26
-                } else {
-                    print(calculatedEquivalent)
-                    calculatedEquivalent = 24
-                }
-            }
-        }
-        
-        // 3. 针对长焦 (Telephoto)
-        // 长焦常算出来是 78，系统显示 77；或算出来 122，系统显示 120
-        if device.deviceType == .builtInTelephotoCamera {
-            if calculatedEquivalent > 70 && calculatedEquivalent < 80 { calculatedEquivalent = 72 }
-            if calculatedEquivalent > 110 && calculatedEquivalent < 125 { calculatedEquivalent = 120 }
-            if calculatedEquivalent > 95 && calculatedEquivalent < 105 { calculatedEquivalent = 100 }
-        }
-        
-        return Int(round(calculatedEquivalent))
-    }
-    
-    func getEquivalentFocalLength() {
-        self.currentFocalLength = getFocalLengthByIndex(idx: currentDeviceIndex, camList: availableDevices)
-    }
 
         // 在 init 中启动监测
     func startDeviceMotion() {
@@ -533,8 +451,6 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
             print("切换失败: \(error)")
         }
         session.commitConfiguration()
-        self.updateApertureInfo()
-        self.getEquivalentFocalLength()
         self.setupLightMeter()
     }
     
@@ -563,6 +479,7 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     
     func toggleAdjustmentMode() {
         // 1. 切换模式
+        // for bar view items
         if activeIndex != nullWidgetIndex && activeIndex != UIWidgets.Style.rawValue {
             isAdjustingValue.toggle()
         }
@@ -821,39 +738,6 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
         }
     }
     
-    
-    /// 💡 读取当前镜头的光圈值并更新 UI 绑定变量
-    func updateApertureInfo() {
-        // 必须在 sessionQueue 中执行，避免与 session 配置产生死锁
-        sessionQueue.async { [weak self] in
-            guard let self = self else { return }
-            
-            // 获取当前正在使用的物理设备
-            guard self.availableDevices.indices.contains(self.currentDeviceIndex) else { return }
-            let device = self.availableDevices[self.currentDeviceIndex]
-            
-            do {
-                // 💡 关键：iOS 26 的 Pro 机型通常需要 lock 状态才能读取某些实时硬件参数
-                try device.lockForConfiguration()
-                
-                // 尝试读取实时值
-                let aperture = device.lensAperture
-                
-                // 💡 保底逻辑：如果实时值为 0，则读取该镜头支持的最大光圈元数据
-                let finalAperture = aperture > 0 ? aperture : (device.lensAperture > 0 ? device.lensAperture : 1.8)
-                
-                // 回到主线程更新 @Published 变量以刷新 UI
-                DispatchQueue.main.async {
-                    self.Aperture = String(format: "F%.1f", finalAperture)
-                }
-                
-                device.unlockForConfiguration()
-            } catch {
-                print("❌ 无法锁定设备以读取光圈: \(error)")
-            }
-        }
-    }
-    
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
         if let error = error { return }
         defer { DispatchQueue.main.async { self.isCapturing = false } }
@@ -1019,102 +903,6 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
             } else if let error = error {
                 print("❌ 保存失败: \(error.localizedDescription)")
             }
-        }
-    }
-}
-
-extension Array where Element == String {
-    func supportedISO(for device: AVCaptureDevice) -> [String] {
-        let maxISO = device.activeFormat.maxISO
-        let minISO = device.activeFormat.minISO
-        
-        return self.filter {
-            if $0 == "AUTO" { return true }
-            guard let val = Float($0) else { return false }
-            return val >= minISO && val <= maxISO
-        }
-    }
-    
-    func supportedSS(for device: AVCaptureDevice) -> [String] {
-        let minSeconds = CMTimeGetSeconds(device.activeFormat.minExposureDuration)
-        let maxSeconds = CMTimeGetSeconds(device.activeFormat.maxExposureDuration)
-        
-        return self.filter {
-            if $0 == "AUTO" { return true }
-            
-            // 💡 修复点：调用一个自定义转换函数，支持处理 "/" 符号
-            guard let val = parseShutterSpeedToDouble($0) else { return false }
-            
-            // 浮点数比较建议加一个极小的余量（epsilon），防止精度误差
-            return val >= (minSeconds - 0.00001) && val <= (maxSeconds + 0.00001)
-        }
-    }
-    
-    func formattedISOoptions() -> [String] {
-        return self.map {
-            isoItem in Int(isoItem) != nil ? "ISO \(isoItem)" : isoItem
-        }
-    }
-
-    // 辅助函数：把 "1/100" 转为 0.01
-    private func parseShutterSpeedToDouble(_ string: String) -> Double? {
-        if let doubleValue = Double(string) {
-            return doubleValue // 处理 "1", "0.8" 等直接数值
-        }
-        
-        // 处理 "1/100" 这种分数格式
-        let components = string.components(separatedBy: "/")
-        if components.count == 2,
-           let numerator = Double(components[0]),
-           let denominator = Double(components[1]),
-           denominator != 0 {
-            return numerator / denominator
-        }
-        
-        return nil
-    }
-}
-
-extension UIDevice {
-    // 💡 获取硬件标识符（如 "iPhone15,3"）
-    var modelIdentifier: String {
-        var systemInfo = utsname()
-        uname(&systemInfo)
-        let machineMirror = Mirror(reflecting: systemInfo.machine)
-        let identifier = machineMirror.children.reduce("") { identifier, element in
-            guard let value = element.value as? Int8, value != 0 else { return identifier }
-            return identifier + String(UnicodeScalar(UInt8(value)))
-        }
-        return identifier
-    }
-}
-
-enum DevicePerformanceTier {
-    case pro      // iPhone 15 Pro 及以上：支持 4K/ProRes 实时预览
-    case high     // iPhone 13 - 14 系列：稳定 4K
-    case standard // 旧款设备：建议默认 1080P 以维持帧率
-}
-
-extension Camera {
-    // MARK: - Metal Setup
-    
-    
-    // MARK: - Performance & Resolution
-    var performanceTier: DevicePerformanceTier {
-        let id = UIDevice.current.modelIdentifier
-        let scanner = Scanner(string: id)
-        _ = scanner.scanUpToCharacters(from: .decimalDigits)
-        let modelMajorVersion = scanner.scanInt() ?? 0
-        
-        if modelMajorVersion >= 17 { return .pro }
-        else if modelMajorVersion >= 15 { return .high }
-        else { return .standard }
-    }
-        
-    func setDefaultResolution() {
-        switch performanceTier {
-        case .pro, .high: self.previewResolution = "HIGH"
-        case .standard: self.previewResolution = "LOW"
         }
     }
 }
