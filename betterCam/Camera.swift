@@ -17,35 +17,9 @@ import Metal
 import MetalKit
 import WidgetKit
 
-enum CameraPermissionStatus {
-    case undetermined  // 尚未询问
-    case authorized    // 已授权
-    case denied        // 已拒绝
-}
-
-enum UIWidgets: Int, CaseIterable {
-    case imageQuality   = 0
-    case lensSwitch     = 1
-    case AFMode         = 2
-    case WBMode         = 3
-    case MENU           = 4
-    case SS             = 5
-    case aperture       = 6
-    case EV             = 7
-    case ISO            = 8
-    case Style          = 9
-}
-
 class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDelegate, AVCapturePhotoCaptureDelegate {
     
     private var isRestoring: Bool = false
-    
-    enum ExposureMode { case waveform, histogram, off }
-    
-    enum ShutterSoundMode: String, CaseIterable {
-        case sony       = "shutter_eqed_gained"
-        case panasonic  = "s1m2_shutter_gained"
-    }
     
     @AppStorage("doneTheTip") var doneTheTip: Bool = false
     
@@ -54,31 +28,27 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     
     @Published var currentFocalLength: Int = 26
     
-    @Published var enableFrontCamera: Bool = false {
-        didSet {
-            //discoverCameras()
-        }
-    }
+    @Published var enableFrontCamera: Bool = false
     
     let overlayWidth: Int = 128
     let overlayHeight: Int = 64
     
-    private var device: MTLDevice? = MTLCreateSystemDefaultDevice()
-    private var commandQueue: MTLCommandQueue?
-    private var pipelineState: MTLComputePipelineState?
-    private var textureCache: CVMetalTextureCache?
+    var device: MTLDevice? = MTLCreateSystemDefaultDevice()
+    var commandQueue: MTLCommandQueue?
+    var pipelineState: MTLComputePipelineState?
+    var textureCache: CVMetalTextureCache?
     
-    private var histogramComputePipeline: MTLComputePipelineState?
-    private let histogramRenderPipeline: MTLRenderPipelineState? = nil// 用于将数据画成条形图
-    private var histogramBuffer: MTLBuffer?
+    var histogramComputePipeline: MTLComputePipelineState?
+    let histogramRenderPipeline: MTLRenderPipelineState? = nil// 用于将数据画成条形图
+    var histogramBuffer: MTLBuffer?
     @Published var histogramImage: CGImage?
         
     @Published var waveformImage: CGImage? // 用于 UI 显示
     
-    private var maxWidgetIndex: Int {
+    var maxWidgetIndex: Int {
         return UIWidgets.allCases.map { $0.rawValue }.max() ?? 0
     }
-    private var nullWidgetIndex: Int {
+    var nullWidgetIndex: Int {
         return maxWidgetIndex + 1
     }
     private var exposureOffsetObserver: NSKeyValueObservation?
@@ -363,25 +333,12 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
         }
     }
     @Published var WBMode: String = "AWB"
-    let ISOoptions = ["AUTO", "50", "64", "100", "125", "160", "200", "250", "320", "400", "500", "640", "800", "1000", "1250", "1600", "2000", "2500", "3200", "4000", "5000", "6400"]
-    let SSoptions = [
-      "AUTO", "1", "0.8", "0.6", "0.5", "0.4", "1/3", "1/4", "1/5", "1/6", 
-      "1/8", "1/10", "1/13", "1/15", "1/20", "1/25", "1/30", "1/40", "1/50",
-      "1/60", "1/80", "1/100", "1/125", "1/160", "1/200", "1/250", "1/320",
-      "1/400", "1/500", "1/640", "1/800", "1/1000", "1/1250", "1/1600",
-      "1/2000", "1/2500", "1/3200", "1/4000", "1/5000", "1/6400", "1/8000",
-      "1/10000", "1/12500", "1/16000", "1/20000", "1/25000", "1/32000",
-      "1/40000", "1/50000", "1/64000"
-    ]
-    let EVoptions = [
-        "-5.0", "-4.7", "-4.3", "-4.0", "-3.7", "-3.3", "-3.0", "-2.7", "-2.3", "-2.0",
-        "-1.7", "-1.3", "-1.0", "-0.7", "-0.3", "0.0",
-        "+0.3", "+0.7", "+1.0", "+1.3", "+1.7", "+2.0", "+2.3", "+2.7", "+3.0", "+3.3",
-        "+3.7", "+4.0", "+4.3", "+4.7", "+5.0"
-    ]
+    
     let imageQualityOptions: [String] = ["DNG+J", "DNG", "JPEG"]
     
-    
+    var ISOoptions: [String] = ParameterAvailable.ISOoptions
+    var SSoptions: [String] = ParameterAvailable.SSoptions
+    var EVoptions: [String] = ParameterAvailable.EVoptions
     @Published var actualISOoptions: [String] = []
     @Published var actualSSoptions: [String] = []
     
@@ -487,37 +444,6 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
         }
         if !styleOptions.contains("MANAGE") {
             styleOptions.append("MANAGE")
-        }
-    }
-    
-    func checkAllPermissions() {
-        // 1. 检查相机权限
-        let cameraStatus = AVCaptureDevice.authorizationStatus(for: .video)
-        handleCameraStatus(cameraStatus)
-        
-        // 2. 检查相册写入权限
-        let photoStatus = PHPhotoLibrary.authorizationStatus(for: .addOnly)
-        handlePhotoStatus(photoStatus)
-    }
-    private func handleCameraStatus(_ status: AVAuthorizationStatus) {
-        switch status {
-        case .authorized: cameraPermission = .authorized
-        case .notDetermined:
-            AVCaptureDevice.requestAccess(for: .video) { granted in
-                DispatchQueue.main.async { self.cameraPermission = granted ? .authorized : .denied }
-            }
-        default: cameraPermission = .denied
-        }
-    }
-
-    private func handlePhotoStatus(_ status: PHAuthorizationStatus) {
-        switch status {
-        case .authorized, .limited: photoPermission = .authorized
-        case .notDetermined:
-            PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
-                DispatchQueue.main.async { self.photoPermission = (status == .authorized || status == .limited) ? .authorized : .denied }
-            }
-        default: photoPermission = .denied
         }
     }
     
@@ -674,13 +600,6 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
         // 比如：如果从调节模式退出，可以自动触发一次硬件锁定
     }
     
-    // --- 1. 权限处理逻辑 ---
-    func checkPhotoLibraryPermission() {
-        let status = PHPhotoLibrary.authorizationStatus(for: .addOnly)
-        if status == .notDetermined {
-            PHPhotoLibrary.requestAuthorization(for: .addOnly) { _ in }
-        }
-    }
     
     var videoDevice: AVCaptureDevice?
     private var apertureObserver: NSKeyValueObservation?
@@ -901,80 +820,7 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
             AudioServicesPlaySystemSound(shutterSoundID)
         }
     }
-     
-    private func adjustValue(direction: Int) {
-        switch activeIndex {
-        case UIWidgets.AFMode.rawValue:
-            AFMode = nextOption(in: AFModeOptions, current: AFMode, direction: direction)
-        case UIWidgets.Style.rawValue: // STYLE
-            style = nextOption(in: styleOptions, current: style, direction: direction)
-        case UIWidgets.SS.rawValue: // SS
-            SS = nextOption(in: actualSSoptions, current: SS, direction: direction)
-        case UIWidgets.EV.rawValue: // EV
-            let isManualMode = (SS != "AUTO" && ISO != "AUTO")
-            if !isManualMode {
-                EV = nextOption(in: EVoptions, current: EV, direction: direction)
-            }
-        case UIWidgets.ISO.rawValue: // ISO
-            ISO = nextOption(in: actualISOoptions, current: ISO, direction: direction)
-        case UIWidgets.lensSwitch.rawValue: switchCamera(direction: direction)
-        case UIWidgets.imageQuality.rawValue: // Image Quality
-            imageQuality = nextOption(in: imageQualityOptions, current: imageQuality, direction: direction)
-        default:
-            break
-        }
-    }
-
-    // 辅助函数：在数组中寻找下一个值（Python 风格的循环索引）
-    private func nextOption(in options: [String], current: String, direction: Int, isEV: Bool = false) -> String {
-        guard !options.isEmpty else { return current }
-        let currentIndex = options.firstIndex(of: current) ?? 0
-        var nextIndex: Int = 0
-        if !isEV {
-            nextIndex = (currentIndex + direction) % options.count
-        } else {
-            // is EV mode
-            if (currentIndex + direction) >= options.count {
-                nextIndex = currentIndex
-            } else
-            if (currentIndex + direction) < 0 {
-                nextIndex = currentIndex
-            } else {
-                nextIndex = currentIndex + direction
-            }
-        }
-        if nextIndex < 0 {
-            nextIndex = options.count - 1
-        }
-        return options[nextIndex]
-    }
     
-    func changeParameter(direction: Int) {
-        /*
-         activeIndex: 0...maxWidgetIndex + 1
-         0...maxWidgetIndex: parameters
-         maxWidgetIndex + 1: nothing selected
-         maxWidgetIndex + 2: will be never reached, just for condition check
-         */
-        
-        if isAdjustingValue {
-            adjustValue(direction: direction)
-        } else {
-            var pendingIndex: Int = 0
-            let newIndex = activeIndex + direction
-            if newIndex >= maxWidgetIndex + 2 { // direction = positive
-                pendingIndex = 0
-            } else if newIndex < 0 { // direction = negative
-                pendingIndex = maxWidgetIndex + 1 // go to nothing selected index
-            } else {
-                pendingIndex = newIndex
-            }
-            DispatchQueue.main.async { [weak self] in
-                guard let self = self else { return }
-                activeIndex = pendingIndex
-            }
-        }
-    }
     
     /// 💡 读取当前镜头的光圈值并更新 UI 绑定变量
     func updateApertureInfo() {
@@ -1251,157 +1097,7 @@ enum DevicePerformanceTier {
 
 extension Camera {
     // MARK: - Metal Setup
-    func setupMetal() {
-        guard let device = device else { return }
-        commandQueue = device.makeCommandQueue()
-        let library = device.makeDefaultLibrary()
-        
-        // 初始化 Waveform 管线
-        if let kernel = library?.makeFunction(name: "waveformKernel") {
-            pipelineState = try? device.makeComputePipelineState(function: kernel)
-        }
-        
-        // 初始化 Histogram 计算管线
-        if let histKernel = library?.makeFunction(name: "histogram_compute") {
-            histogramComputePipeline = try! device.makeComputePipelineState(function: histKernel)
-        }
-        
-        // 初始化直方图 Buffer (256个等级)
-        histogramBuffer = device.makeBuffer(length: 256 * MemoryLayout<UInt32>.stride, options: .storageModeShared)
-    }
-
-    // MARK: - Waveform Process
-    func processWaveform(from pixelBuffer: CVPixelBuffer) {
-        guard exposureIndicatorMode == .waveform,
-              let pipeline = pipelineState,
-              let queue = commandQueue,
-              let cache = textureCache else { return }
-        
-        let width = CVPixelBufferGetWidth(pixelBuffer)
-        let height = CVPixelBufferGetHeight(pixelBuffer)
-        var cvTexture: CVMetalTexture?
-        
-        CVMetalTextureCacheCreateTextureFromImage(kCFAllocatorDefault, cache, pixelBuffer, nil, .bgra8Unorm, width, height, 0, &cvTexture)
-        guard let inputTexture = CVMetalTextureGetTexture(cvTexture!) else { return }
-        
-        // 输出纹理强制设为 128x64
-        let desc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm, width: overlayWidth, height: overlayHeight, mipmapped: false)
-        desc.usage = [.shaderWrite, .shaderRead]
-        guard let outputTexture = device?.makeTexture(descriptor: desc) else { return }
-        
-        guard let commandBuffer = queue.makeCommandBuffer(),
-              let encoder = commandBuffer.makeComputeCommandEncoder() else { return }
-        
-        encoder.setComputePipelineState(pipeline)
-        encoder.setTexture(inputTexture, index: 0)
-        encoder.setTexture(outputTexture, index: 1)
-        
-        let threadGroupSize = MTLSize(width: 16, height: 16, depth: 1)
-        let threadGroups = MTLSize(width: (outputTexture.width + 15) / 16,
-                                   height: (outputTexture.height + 15) / 16,
-                                   depth: 1)
-        
-        encoder.dispatchThreadgroups(threadGroups, threadsPerThreadgroup: threadGroupSize)
-        encoder.endEncoding()
-        
-        commandBuffer.addCompletedHandler { [weak self] _ in
-            guard let self = self else { return }
-            let cgImage = self.makeCGImage(from: outputTexture)
-            DispatchQueue.main.async {
-                self.waveformImage = cgImage
-            }
-        }
-        commandBuffer.commit()
-    }
-
-    // MARK: - Histogram Process
-    func processHistogram(from pixelBuffer: CVPixelBuffer) {
-        guard exposureIndicatorMode == .histogram,
-              let pipeline = histogramComputePipeline,
-              let queue = commandQueue,
-              let cache = textureCache,
-              let hBuffer = histogramBuffer else { return }
-
-        let width = CVPixelBufferGetWidth(pixelBuffer)
-        let height = CVPixelBufferGetHeight(pixelBuffer)
-        var cvTexture: CVMetalTexture?
-        CVMetalTextureCacheCreateTextureFromImage(kCFAllocatorDefault, cache, pixelBuffer, nil, .bgra8Unorm, width, height, 0, &cvTexture)
-        guard let inputTexture = CVMetalTextureGetTexture(cvTexture!) else { return }
-
-        // 重置统计数据
-        memset(hBuffer.contents(), 0, hBuffer.length)
-
-        guard let commandBuffer = queue.makeCommandBuffer(),
-              let encoder = commandBuffer.makeComputeCommandEncoder() else { return }
-
-        encoder.setComputePipelineState(pipeline)
-        encoder.setTexture(inputTexture, index: 0)
-        encoder.setBuffer(hBuffer, offset: 0, index: 0)
-
-        let w = pipeline.threadExecutionWidth
-        let h = pipeline.maxTotalThreadsPerThreadgroup / w
-        let threadsPerGroup = MTLSize(width: w, height: h, depth: 1)
-        let gridSize = MTLSize(width: (inputTexture.width + w - 1) / w,
-                               height: (inputTexture.height + h - 1) / h,
-                               depth: 1)
-
-        encoder.dispatchThreadgroups(gridSize, threadsPerThreadgroup: threadsPerGroup)
-        encoder.endEncoding()
-
-        commandBuffer.addCompletedHandler { [weak self] _ in
-            self?.renderHistogramUI()
-        }
-        commandBuffer.commit()
-    }
-
-    private func renderHistogramUI() {
-        guard let buffer = histogramBuffer else { return }
-        let ptr = buffer.contents().bindMemory(to: UInt32.self, capacity: 256)
-        
-        var maxCount: Float = 1.0
-        for i in 0..<256 { maxCount = max(maxCount, Float(ptr[i])) }
-
-        // 适配 128x64 规格
-        let size = CGSize(width: CGFloat(overlayWidth), height: CGFloat(overlayHeight))
-        let renderer = UIGraphicsImageRenderer(size: size)
-        
-        let image = renderer.image { context in
-            let ctx = context.cgContext
-            ctx.setFillColor(UIColor.white.cgColor)
-            
-            // 💡 优化：256 bins 对应 128 像素，每像素合并 2 bins
-            let binsPerPixel = 2
-            
-            for x in 0..<overlayWidth {
-                let binIndex = x * binsPerPixel
-                // 取两个相邻 bin 的平均值保证曲线平滑
-                let count = Float(ptr[binIndex] + ptr[binIndex + 1]) / 2.0
-                let barHeight = CGFloat(count / maxCount) * size.height
-                
-                ctx.fill(CGRect(x: CGFloat(x), y: size.height - barHeight, width: 1.0, height: barHeight))
-            }
-        }
-
-        DispatchQueue.main.async {
-            self.histogramImage = image.cgImage
-        }
-    }
-
-    // MARK: - Helpers
-    func makeCGImage(from texture: MTLTexture) -> CGImage? {
-        let width = texture.width
-        let height = texture.height
-        let rowBytes = width * 4
-        var data = [UInt8](repeating: 0, count: rowBytes * height)
-        
-        texture.getBytes(&data, bytesPerRow: rowBytes, from: MTLRegionMake2D(0, 0, width, height), mipmapLevel: 0)
-        
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        let bitmapInfo = CGBitmapInfo(rawValue: CGImageAlphaInfo.premultipliedLast.rawValue)
-        guard let provider = CGDataProvider(data: Data(data) as CFData) else { return nil }
-        
-        return CGImage(width: width, height: height, bitsPerComponent: 8, bitsPerPixel: 32, bytesPerRow: rowBytes, space: colorSpace, bitmapInfo: bitmapInfo, provider: provider, decode: nil, shouldInterpolate: false, intent: .defaultIntent)
-    }
+    
     
     // MARK: - Performance & Resolution
     var performanceTier: DevicePerformanceTier {
