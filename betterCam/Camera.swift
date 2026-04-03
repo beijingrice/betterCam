@@ -101,7 +101,7 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     
     // 在 Camera 类中添加
     @Published var lutIntensity: Float = 1.0  // 0.0 到 1.0
-    @Published var grainIntensity: Float = 0.5 // 0.0 到 1.0
+    @Published var grainIntensity: Float = 1.0 // 0.0 到 1.0
     
     private var previewResolutionOld: String = "HIGH"
     @Published var previewResolution: String = "HIGH" { // Let system decide as a default
@@ -273,6 +273,7 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     
     @AppStorage("enablePermanentParameterStorage") var enablePermanentParameterStorage: Bool = false
     @AppStorage("perferAUTO") var perferAUTO: Bool = false
+    @AppStorage("enableColorProfileInRAW") var enableColorProfileInRAW: Bool = false
     
     let prefs = UserDefaults(suiteName: "group.com.rice.betterCam")
     
@@ -323,7 +324,7 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
             guard !isRestoring else { return }
             autoAmode(nowBeingControlled: "SS")
             updateExposure()
-            updateParameterToStorage()
+            // updateParameterToStorage()
     }
     }
     @Published var Aperture: String = "F1.8"
@@ -334,7 +335,7 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
             guard !isRestoring else { return }
             autoAmode(nowBeingControlled: "ISO")
             updateExposure()
-            updateParameterToStorage()
+            // updateParameterToStorage()
         }
     }
     // var styleOptions: [String] = ["STD", "RICH", "NOSTALGIC", "BW", "MANAGE"]
@@ -342,7 +343,15 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
     var styleOptions: [String] = []
     var AFModeOptions: [String] = ["AF-C", "AF-S"]
     @Published var style: String = "STD"
-    @Published var imageQuality: String = "JPEG"
+    @Published var imageQuality: String = "JPEG" {
+        didSet {
+            if imageQuality == "DNG" {
+                HDRswitch(false)
+            } else {
+                HDRswitch(true)
+            }
+        }
+    }
     @Published var aspectRatio: String = "4:3"
     @Published var AFMode: String = "AF-C" {
         didSet {
@@ -764,6 +773,7 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
                                   lutIntensity: lutIntensity,
                                   grainIntensity: grainIntensity)
         
+        
         if let cgImage = context.createCGImage(finalImage, from: finalImage.extent) {
             DispatchQueue.main.async {
                 self.currentPreviewImage = cgImage
@@ -807,6 +817,30 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
             } catch {
                 print("❌ 对焦配置失败: \(error)")
             }
+        }
+    }
+    
+    func HDRswitch(_ mode: Bool) {
+        sessionQueue.async { [weak self] in
+            guard let self = self else { return }
+            
+            guard let device = self.availableDevices.indices.contains(self.currentDeviceIndex) ?
+                    self.availableDevices[self.currentDeviceIndex] :
+                        AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: .back) else { return }
+            
+            do {
+                try device.lockForConfiguration()
+                if device.activeFormat.isVideoHDRSupported {
+                    if device.automaticallyAdjustsVideoHDREnabled {
+                        device.automaticallyAdjustsVideoHDREnabled = false
+                    }
+                    device.isVideoHDREnabled = mode
+                }
+                device.unlockForConfiguration()
+            } catch {
+                print("HDR setting failed!")
+            }
+            print("Now HDR Preview is:", device.isVideoHDREnabled)
         }
     }
     
@@ -926,13 +960,18 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
         if isAdjustingValue {
             adjustValue(direction: direction)
         } else {
+            var pendingIndex: Int = 0
             let newIndex = activeIndex + direction
             if newIndex >= maxWidgetIndex + 2 { // direction = positive
-                activeIndex = 0
+                pendingIndex = 0
             } else if newIndex < 0 { // direction = negative
-                activeIndex = maxWidgetIndex + 1 // go to nothing selected index
+                pendingIndex = maxWidgetIndex + 1 // go to nothing selected index
             } else {
-                activeIndex = newIndex
+                pendingIndex = newIndex
+            }
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                activeIndex = pendingIndex
             }
         }
     }
@@ -1047,9 +1086,13 @@ class Camera: NSObject, ObservableObject, AVCaptureVideoDataOutputSampleBufferDe
         if let photoConnection = photoOutput.connection(with: .video) {
             if let videoDevice = availableDevices.indices.contains(currentDeviceIndex) ? availableDevices[currentDeviceIndex] : nil,
                videoDevice.position == .front {
-                photoConnection.isVideoMirrored = true // 开启硬件级镜像
+                if photoConnection.isVideoMirroringSupported {
+                    photoConnection.isVideoMirrored = true // 开启硬件级镜像
+                }
             } else {
-                photoConnection.isVideoMirrored = false
+                if photoConnection.isVideoMirroringSupported {
+                    photoConnection.isVideoMirrored = false
+                }
             }
         }
         

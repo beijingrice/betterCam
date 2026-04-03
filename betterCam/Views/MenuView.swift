@@ -177,6 +177,22 @@ struct MenuView: View {
         }
     }
     
+    private var enableColorProfileInRAWsection: some View {
+        VStack(alignment: .leading, spacing: innerSpacing) {
+            Text("Enable color profile in RAW mode")
+                .font(.caption.bold()).foregroundColor(.gray)
+            HStack(spacing: 0) {
+                SegmentedButton(title: ENABLE, isSelected: camera.enableColorProfileInRAW) {
+                    camera.enableColorProfileInRAW = true
+                }
+                SegmentedButton(title: DISABLE, isSelected: !camera.enableColorProfileInRAW) {
+                    camera.enableColorProfileInRAW = false
+                }
+            }
+            .background(Color.white.opacity(0.1)).cornerRadius(roundedCornerRadius)
+        }
+    }
+    
     private var moneyONEGAIsection: some View {
         VStack(alignment: .leading, spacing: innerSpacing) {
             Text("Buy me a cup of coffee")
@@ -213,22 +229,6 @@ struct MenuView: View {
                     RoundedRectangle(cornerRadius: 10)
                         .stroke(Color.yellow.opacity(0.4), lineWidth: 1)
                 )
-            }
-            Button(action: {
-                haptic(.light)
-                Task {
-                    let success = await storeManager.restorePurchases()
-                    if success {
-                        haptic(.medium)
-                        showRestoredMsg = true
-                        camera.doneTheTip = true
-                    }
-                }
-            }) {
-                Text("Restore Purchases")
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(.gray)
-                    .padding(.top, 4)
             }
         }
     }
@@ -277,6 +277,8 @@ struct MenuView: View {
                         saveSSandISOsection
                         
                         preferAUTOsection
+                        
+                        enableColorProfileInRAWsection
                         
                         if !camera.doneTheTip {
                             moneyONEGAIsection // かわいいからお金お願いします〜
@@ -385,4 +387,5 @@ struct SegmentedButton: View {
 
 #Preview {
     MenuView(camera: Camera())
+        .environmentObject(StoreManager())
 }

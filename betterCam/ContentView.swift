@@ -9,6 +9,7 @@ import SwiftUI
 import UIKit
 
 struct ContentView: View {
+    @Environment(\.scenePhase) var scenePhase
     @StateObject var camera = Camera()
     var body: some View {
         ZStack {
@@ -40,6 +41,12 @@ struct ContentView: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     camera.callAllStartupFuncs()
                 }
+            }
+        }
+        .onChange(of: scenePhase) { oldPhase, newPhase in
+            if newPhase == .background {
+                // 💡 只有当 App 进入后台时，才保存并刷新小组件
+                camera.updateParameterToStorage()
             }
         }
         .fullScreenCover(isPresented: Binding(
