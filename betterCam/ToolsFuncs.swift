@@ -9,29 +9,7 @@ import Foundation
 import AVFoundation
 extension Camera {
     
-    func manageSession() {
-        sessionQueue.async {
-            [weak self] in
-            guard let self = self else { return }
-            if !inCameraView {
-                if self.session.isRunning {
-                    self.session.stopRunning()
-                }
-            } else {
-                if !self.session.isRunning {
-                    self.session.startRunning()
-                }
-            }
-        }
-    }
-    
     func changeParameter(direction: Int) {
-        /*
-         activeIndex: 0...maxWidgetIndex + 1
-         0...maxWidgetIndex: parameters
-         maxWidgetIndex + 1: nothing selected
-         maxWidgetIndex + 2: will be never reached, just for condition check
-         */
         
         if isAdjustingValue {
             adjustValue(direction: direction)
@@ -52,30 +30,30 @@ extension Camera {
         }
     }
     
-    private func adjustValue(direction: Int) {
+    func adjustValue(direction: Int) {
         switch activeIndex {
         case UIWidgets.AFMode.rawValue:
-            AFMode = nextOption(in: AFModeOptions, current: AFMode, direction: direction)
+            parameterManager.AFMode = nextOption(in: parameterManager.AFModeOptions, current: parameterManager.AFMode, direction: direction)
         case UIWidgets.Style.rawValue: // STYLE
-            style = nextOption(in: styleOptions, current: style, direction: direction)
+            parameterManager.style = nextOption(in: parameterManager.styleOptions, current: parameterManager.style, direction: direction)
         case UIWidgets.SS.rawValue: // SS
-            SS = nextOption(in: actualSSoptions, current: SS, direction: direction)
+            parameterManager.SS = nextOption(in: parameterManager.actualSSoptions, current: parameterManager.SS, direction: direction)
         case UIWidgets.EV.rawValue: // EV
-            let isManualMode = (SS != "AUTO" && ISO != "AUTO")
+            let isManualMode = (parameterManager.SS != "AUTO" && parameterManager.ISO != "AUTO")
             if !isManualMode {
-                EV = nextOption(in: EVoptions, current: EV, direction: direction)
+                parameterManager.EV = nextOption(in: parameterManager.EVOptions, current: parameterManager.EV, direction: direction)
             }
         case UIWidgets.ISO.rawValue: // ISO
-            ISO = nextOption(in: actualISOoptions, current: ISO, direction: direction)
-        case UIWidgets.lensSwitch.rawValue: switchCamera(direction: direction)
+            parameterManager.ISO = nextOption(in: parameterManager.actualISOoptions, current: parameterManager.ISO, direction: direction)
+        case UIWidgets.lensSwitch.rawValue: lensManager.switchLens(direction: direction)
         case UIWidgets.imageQuality.rawValue: // Image Quality
-            imageQuality = nextOption(in: imageQualityOptions, current: imageQuality, direction: direction)
+            parameterManager.imageQuality = nextOption(in: parameterManager.imageQualityOptions, current: parameterManager.imageQuality, direction: direction)
         default:
             break
         }
     }
     
-    private func nextOption(in options: [String], current: String, direction: Int, isEV: Bool = false) -> String {
+    func nextOption(in options: [String], current: String, direction: Int, isEV: Bool = false) -> String {
         guard !options.isEmpty else { return current }
         let currentIndex = options.firstIndex(of: current) ?? 0
         var nextIndex: Int = 0

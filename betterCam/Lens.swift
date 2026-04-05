@@ -11,26 +11,30 @@ struct Lens {
     let device: AVCaptureDevice
     let equivalentFocalLength: Int
     let aperture: String
+    let availableSSoptions: [String]
+    let availableISOoptions: [String]
     
     init(device: AVCaptureDevice) {
         self.device = device
-        self.aperture = Lens.updateApertureInfo(device: device)
-        self.equivalentFocalLength = Lens.getFocalLengthByIndex(device: device)
+        self.aperture = Lens.getAperture(device: device)
+        self.equivalentFocalLength = Lens.getFocalLength(device: device)
+        self.availableSSoptions = ParameterAvailable.SSoptions.supportedSS(for: device)
+        self.availableISOoptions = ParameterAvailable.ISOoptions.supportedISO(for: device)
     }
     
-    static func updateApertureInfo(device: AVCaptureDevice) -> String {
+    static func getAperture(device: AVCaptureDevice) -> String {
         do {
             try device.lockForConfiguration()
             let aperture = device.lensAperture
             let finalAperture = aperture > 0 ? aperture : (device.lensAperture > 0 ? device.lensAperture: 1.8)
             return String(format: "F%.1f", finalAperture)
         } catch {
-            
+            print("Error when fetching aperture!")
         }
         return "F1.8"
     }
     
-    static func getFocalLengthByIndex(device: AVCaptureDevice) -> Int {
+    static func getFocalLength(device: AVCaptureDevice) -> Int {
         print("Now calculating focal length for device:", device)
         let baseFormat = device.formats.first { format in
             let dims = CMVideoFormatDescriptionGetDimensions(format.formatDescription)

@@ -9,19 +9,21 @@ import SwiftUI
 
 struct TopBarView: View {
     @EnvironmentObject var camera: Camera
+    @EnvironmentObject var pm: ParameterManager
+    @EnvironmentObject var lm: LensManager
     var body: some View {
         HStack (spacing: 0){
             Group {
-                ParameterItem(title: camera.imageQuality, index: UIWidgets.imageQuality.rawValue)
+                ParameterItem(title: pm.imageQuality, index: UIWidgets.imageQuality.rawValue)
                 Spacer()
                 ParameterItem(
-                    title: String(camera.currentFocalLength) + "mm",
+                    title: String(lm.currentLens.equivalentFocalLength) + "mm",
                     index: UIWidgets.lensSwitch.rawValue
                 )
                 Spacer()
-                ParameterItem(title: camera.AFMode, index: UIWidgets.AFMode.rawValue)
+                ParameterItem(title: pm.AFMode, index: UIWidgets.AFMode.rawValue)
                 Spacer()
-                ParameterItem(title: camera.WBMode, index: UIWidgets.WBMode.rawValue)
+                ParameterItem(title: pm.WBMode, index: UIWidgets.WBMode.rawValue)
                 Spacer()
                 ParameterItem(title: "MENU", index: UIWidgets.MENU.rawValue)
             }

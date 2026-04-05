@@ -35,25 +35,6 @@ struct MenuView: View {
         
     }
     
-    private var previewResSection: some View {
-        VStack(alignment: .leading, spacing: innerSpacing) {
-            Text("Preview Resolution")
-                .font(.caption.bold())
-                .foregroundColor(.gray)
-            
-            HStack(spacing: 0) {
-                SegmentedButton(title: LOW, isSelected: camera.previewResolution == "LOW") {
-                    updateResolution("LOW")
-                }
-                SegmentedButton(title: HIGH, isSelected: camera.previewResolution == "HIGH") {
-                    updateResolution("HIGH")
-                }
-            }
-            .background(Color.white.opacity(0.1))
-            .cornerRadius(roundedCornerRadius)
-        }
-    }
-    
     private var waveFormHistogramSection: some View {
         VStack(alignment: .leading, spacing: innerSpacing) {
             Text("Exposure Indicator")
@@ -67,7 +48,6 @@ struct MenuView: View {
                     // 💡 异步开启，防止 GPU 突发负载引起主线程瞬间丢帧
                     DispatchQueue.main.async {
                         camera.exposureIndicatorMode = .waveform
-                        camera.histogramImage = nil
                     }
                 }
                 SegmentedButton(title: HISTOGRAM, isSelected: camera.exposureIndicatorMode == .histogram) {
@@ -76,15 +56,12 @@ struct MenuView: View {
                     // 💡 异步开启，防止 GPU 突发负载引起主线程瞬间丢帧
                     DispatchQueue.main.async {
                         camera.exposureIndicatorMode = .histogram
-                        camera.waveformImage = nil
                     }
                 }
                 SegmentedButton(title: OFF, isSelected: camera.exposureIndicatorMode == .off) {
                     haptic(.medium)
                     DispatchQueue.main.async {
                         camera.exposureIndicatorMode = .off
-                        camera.waveformImage = nil // 立即清空显存
-                        camera.histogramImage = nil
                     }
                 }
             }
@@ -99,7 +76,7 @@ struct MenuView: View {
                 .font(.caption.bold())
                 .foregroundColor(.gray)
             HStack(spacing: 0) {
-                SegmentedButton(title: ENABLE, isSelected: camera.enableFrontCamera) {
+                SegmentedButton(title: ENABLE, isSelected: $camera.) {
                     haptic(.medium)
                     DispatchQueue.main.async {
                         camera.enableFrontCamera = true
@@ -263,9 +240,6 @@ struct MenuView: View {
                             headerSection
                         }
                         
-                        // 2. 预览分辨率选择
-                        previewResSection
-                        
                         // 3. 波形图开关
                         // MenuView.swift 中的波形图部分
                         waveFormHistogramSection
@@ -306,18 +280,6 @@ struct MenuView: View {
             .alert("Thank you!", isPresented: $showThanksAlert) {
                 Button("OK", role: .cancel) {}
             }
-        }
-    }
-    
-    // --- 逻辑控制 ---
-
-    // 💡 修正 1：切换分辨率时，先触发震动，再异步提交重度逻辑
-    private func updateResolution(_ res: String) {
-        haptic(.light)
-        
-        // 使用 async 确保当前按钮的“松开”动画和震动能被主线程优先渲染
-        DispatchQueue.main.async {
-            camera.previewResolution = res
         }
     }
     

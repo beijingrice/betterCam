@@ -4,38 +4,92 @@
 //
 //  Created by Rice on 2026/4/3.
 //
-
-import Foundation
 import Metal
 import MetalKit
-import CoreImage
 import UIKit
+import Combine
 
-extension Camera {
+class MetalWHProcessor: ObservableObject {
+    // View Dimensions
+    let overlayWidth: Int = 128
+    let overlayHeight: Int = 64
     
-    func setupMetal() {
-        guard let device = device else { return }
-        commandQueue = device.makeCommandQueue()
-        let library = device.makeDefaultLibrary()
+    // Enabled Exposure Indicator
+    @Published var exposureIndicatorMode: ExposureMode = .off
+    
+    static let shared = MetalWHProcessor()
+    
+    // Basic Metal Components
+    private let device: MTLDevice?
+    private let commandQueue: MTLCommandQueue?
+    private var textureCache: CVMetalTextureCache?
+    
+    // Pipeline status
+    private var waveformPipeline: MTLComputePipelineState?
+    private var histogramPipeline: MTLComputePipelineState?
+    private var histogramBuffer: MTLBuffer?
+    
+    @Published var waveformImage: CGImage?
+    @Published var histogramImage: CGImage?
+    
+    private init() {
+        self.device = MTLCreateSystemDefaultDevice()
+        self.commandQueue = device?.makeCommandQueue()
         
-        // 初始化 Waveform 管线
-        if let kernel = library?.makeFunction(name: "waveformKernel") {
-            pipelineState = try? device.makeComputePipelineState(function: kernel)
+        if let device = device {
+            CVMetalTextureCacheCreate(kCFAllocatorDefault, nil, device, nil, &textureCache)
         }
         
-        // 初始化 Histogram 计算管线
-        if let histKernel = library?.makeFunction(name: "histogram_compute") {
-            histogramComputePipeline = try! device.makeComputePipelineState(function: histKernel)
-        }
         
-        // 初始化直方图 Buffer (256个等级)
-        histogramBuffer = device.makeBuffer(length: 256 * MemoryLayout<UInt32>.stride, options: .storageModeShared)
     }
-
-    // MARK: - Waveform Process
+    
+    private func setupPipelines() {
+        guard let device = device, let library = device.makeDefaultLibrary() else { return }
+        
+        if let waveformKernel = library.makeFunction(name: "waveformKernel") {
+            waveformPipeline = try? device.makeComputePipelineState(function: waveformKernel)
+        }
+        
+        if let histKernel = library.makeFunction(name: "histKernel") {
+            histogramPipeline = try? device.makeComputePipelineState(function: histKernel)
+        }
+        
+        histogramBuffer = device.makeBuffer(length: 128 * MemoryLayout<UInt32>.stride, options: .storageModeShared)
+    }
+    
+    func process(pixelBuffer: CVPixelBuffer) {
+        guard self.exposureIndicatorMode != .off else { return }
+        
+        if self.exposureIndicatorMode == .waveform {
+            self.processWaveform(from: pixelBuffer)
+            // clean up VRAM
+            if histogramImage != nil {
+                DispatchQueue.main.async {
+                    self.histogramImage = nil
+                }
+            }
+        } else if self.exposureIndicatorMode == .histogram {
+            self.processHistogram(from: pixelBuffer)
+            // clean up VRAM
+            if waveformImage != nil {
+                DispatchQueue.main.async {
+                    self.waveformImage = nil
+                }
+            }
+        } else if self.exposureIndicatorMode == .off {
+            // clean up VRAM
+            if waveformImage != nil || histogramImage != nil {
+                DispatchQueue.main.async {
+                    self.waveformImage = nil
+                    self.histogramImage = nil
+                }
+            }
+        }
+    }
+    
     func processWaveform(from pixelBuffer: CVPixelBuffer) {
         guard exposureIndicatorMode == .waveform,
-              let pipeline = pipelineState,
+              let pipeline = waveformPipeline,
               let queue = commandQueue,
               let cache = textureCache else { return }
         
@@ -79,7 +133,7 @@ extension Camera {
     // MARK: - Histogram Process
     func processHistogram(from pixelBuffer: CVPixelBuffer) {
         guard exposureIndicatorMode == .histogram,
-              let pipeline = histogramComputePipeline,
+              let pipeline = histogramPipeline,
               let queue = commandQueue,
               let cache = textureCache,
               let hBuffer = histogramBuffer else { return }
@@ -148,8 +202,7 @@ extension Camera {
             self.histogramImage = image.cgImage
         }
     }
-
-    // MARK: - Helpers
+    
     func makeCGImage(from texture: MTLTexture) -> CGImage? {
         let width = texture.width
         let height = texture.height

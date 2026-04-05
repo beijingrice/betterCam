@@ -9,19 +9,21 @@ import SwiftUI
 
 struct BottomBarView: View {
     @EnvironmentObject var camera: Camera
+    @EnvironmentObject var pm: ParameterManager
+    @EnvironmentObject var lm: LensManager
     var body: some View {
         HStack(spacing: 0) {
             Group {
-                ParameterItem(title: camera.SS, index: UIWidgets.SS.rawValue)
+                ParameterItem(title: pm.SS, index: UIWidgets.SS.rawValue)
                 Spacer()
-                ParameterItem(title: camera.Aperture, index: UIWidgets.aperture.rawValue)
+                ParameterItem(title: pm.Aperture, index: UIWidgets.aperture.rawValue)
                 Spacer()
-                ParameterItem(title: camera.EV, index: UIWidgets.EV.rawValue)
+                ParameterItem(title: pm.EV, index: UIWidgets.EV.rawValue)
                 Spacer()
-                ParameterItem(title: camera.ISO, index: UIWidgets.ISO.rawValue)
+                ParameterItem(title: pm.ISO, index: UIWidgets.ISO.rawValue)
                 Spacer()
-                ParameterItem(title: camera.style, index: UIWidgets.Style.rawValue)
-            } 
+                ParameterItem(title: pm.style, index: UIWidgets.Style.rawValue)
+            }
         }
         .frame(height: 40)
         .background(Color.black.opacity(0.5))

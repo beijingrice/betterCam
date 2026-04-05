@@ -9,7 +9,10 @@ import Foundation
 import AVFoundation
 import Photos
 
-extension Camera {
+class PermissionManager {
+    var cameraPermission: CameraPermissionStatus = .denied
+    var photoPermission: CameraPermissionStatus = .denied
+    
     func checkPhotoLibraryPermission() {
         let status = PHPhotoLibrary.authorizationStatus(for: .addOnly)
         if status == .notDetermined {
