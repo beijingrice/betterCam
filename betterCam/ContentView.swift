@@ -35,6 +35,9 @@ struct ContentView: View {
                     .zIndex(99) // 确保在最上层
             }
         }
+        .environmentObject(camera)
+        .environmentObject(camera.parameterManager) // 💡 必须加上
+        .environmentObject(camera.lensManager)
         .onChange(of: camera.isShowingTutorial) {
             isShowing in
             if !isShowing {
@@ -43,10 +46,10 @@ struct ContentView: View {
                 }
             }
         }
-        .onChange(of: scenePhase) { oldPhase, newPhase in
-            if newPhase == .background {
-                // 💡 只有当 App 进入后台时，才保存并刷新小组件
-                camera.updateParameterToStorage()
+        .onChange(of: scenePhase) {
+            // 💡 直接用外层的变量，不需要写 "newPhase in"
+            if scenePhase == .background {
+                camera.parameterManager.saveExposureParameters()
             }
         }
         .fullScreenCover(isPresented: Binding(
@@ -102,6 +105,9 @@ struct ContentViewPortrait: View {
                         .zIndex(99) // 确保在最上层
                 }
             }   // START OF PROPERTIES
+            .environmentObject(camera)
+            .environmentObject(camera.parameterManager) // 💡 必须加上
+            .environmentObject(camera.lensManager)
             .onChange(of: camera.isShowingTutorial) {
                 isShowing in
                 if !isShowing {

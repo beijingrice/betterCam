@@ -70,26 +70,25 @@ struct MenuView: View {
         }
     }
     
+    // TODO: Check if there's any issue after added/removed front cam
     private var enableFrontCameraOrNotSection: some View {
         VStack (alignment: .leading, spacing: innerSpacing) { // Enable front camera
             Text("Front Camera")
                 .font(.caption.bold())
                 .foregroundColor(.gray)
             HStack(spacing: 0) {
-                SegmentedButton(title: ENABLE, isSelected: $camera.) {
+                SegmentedButton(title: ENABLE, isSelected: camera.parameterManager.enableFrontCamera) {
                     haptic(.medium)
                     DispatchQueue.main.async {
-                        camera.enableFrontCamera = true
-                        camera.discoverCameras()
+                        camera.parameterManager.enableFrontCamera = true
+                        camera.lensManager.discoverCameras()
                     }
                 }
-                SegmentedButton(title: DISABLE, isSelected: !camera.enableFrontCamera) {
+                SegmentedButton(title: DISABLE, isSelected: !camera.parameterManager.enableFrontCamera) {
                     haptic(.medium)
                     DispatchQueue.main.async {
-                        camera.enableFrontCamera = false
-                        camera.discoverCameras()
-                        camera.currentDeviceIndex = 0
-                        camera.switchCamera(direction: 0)
+                        camera.parameterManager.enableFrontCamera = false
+                        camera.lensManager.discoverCameras()
                     }
                 }
             }
@@ -103,15 +102,13 @@ struct MenuView: View {
             Text("Shutter Sound")
                 .font(.caption.bold()).foregroundColor(.gray)
             HStack(spacing: 0) {
-                SegmentedButton(title: "1", isSelected: camera.shutterSoundMode == .sony) {
+                SegmentedButton(title: "1", isSelected: camera.parameterManager.shutterSoundSelection == .sony) {
                     haptic(.medium)
-                    camera.shutterSoundMode = .sony
-                    camera.changeShutterSound()
+                    camera.parameterManager.shutterSoundSelection = .sony
                 }
-                SegmentedButton(title: "2", isSelected: camera.shutterSoundMode == .panasonic) {
+                SegmentedButton(title: "2", isSelected: camera.parameterManager.shutterSoundSelection == .panasonic) {
                     haptic(.medium)
-                    camera.shutterSoundMode = .panasonic
-                    camera.changeShutterSound()
+                    camera.parameterManager.shutterSoundSelection = .panasonic
                 }
             }
             .background(Color.white.opacity(0.1)).cornerRadius(roundedCornerRadius)
@@ -123,14 +120,14 @@ struct MenuView: View {
             Text("Save shutter speed and ISO from last session")
                 .font(.caption.bold()).foregroundColor(.gray)
             HStack(spacing: 0) {
-                SegmentedButton(title: ENABLE, isSelected: camera.enablePermanentParameterStorage, isDisabled: camera.perferAUTO) {
+                SegmentedButton(title: ENABLE, isSelected: camera.parameterManager.enablePermanentStorage, isDisabled: camera.parameterManager.perferAUTO) {
                     haptic(.medium)
-                    camera.enablePermanentParameterStorage = true
-                    camera.updateParameterToStorage()
+                    camera.parameterManager.enablePermanentStorage = true
+                    camera.parameterManager.saveExposureParameters()
                 }
-                SegmentedButton(title: DISABLE, isSelected: !camera.enablePermanentParameterStorage, isDisabled: camera.perferAUTO) {
+                SegmentedButton(title: DISABLE, isSelected: !camera.parameterManager.enablePermanentStorage, isDisabled: camera.parameterManager.perferAUTO) {
                     haptic(.medium)
-                    camera.enablePermanentParameterStorage = false
+                    camera.parameterManager.enablePermanentStorage = false
                 }
             }
             .background(Color.white.opacity(0.1)).cornerRadius(roundedCornerRadius)
@@ -142,18 +139,19 @@ struct MenuView: View {
             Text("Prefer AUTO mode when launched")
                 .font(.caption.bold()).foregroundColor(.gray)
             HStack(spacing: 0) {
-                SegmentedButton(title: ENABLE, isSelected: camera.perferAUTO) {
-                    camera.perferAUTO = true
-                    camera.enablePermanentParameterStorage = false
+                SegmentedButton(title: ENABLE, isSelected: camera.parameterManager.perferAUTO) {
+                    camera.parameterManager.perferAUTO = true
+                    camera.parameterManager.enablePermanentStorage = false
                 }
-                SegmentedButton(title: DISABLE, isSelected: !camera.perferAUTO) {
-                    camera.perferAUTO = false
+                SegmentedButton(title: DISABLE, isSelected: !camera.parameterManager.perferAUTO) {
+                    camera.parameterManager.perferAUTO = false
                 }
             }
             .background(Color.white.opacity(0.1)).cornerRadius(roundedCornerRadius)
         }
     }
     
+    /*
     private var enableColorProfileInRAWsection: some View {
         VStack(alignment: .leading, spacing: innerSpacing) {
             Text("Enable color profile in RAW mode")
@@ -169,6 +167,7 @@ struct MenuView: View {
             .background(Color.white.opacity(0.1)).cornerRadius(roundedCornerRadius)
         }
     }
+     */
     
     private var moneyONEGAIsection: some View {
         VStack(alignment: .leading, spacing: innerSpacing) {
@@ -252,7 +251,8 @@ struct MenuView: View {
                         
                         preferAUTOsection
                         
-                        enableColorProfileInRAWsection
+                        // enableColorProfileInRAWsection
+                        // TODO: Enable it
                         
                         if !camera.doneTheTip {
                             moneyONEGAIsection // かわいいからお金お願いします〜

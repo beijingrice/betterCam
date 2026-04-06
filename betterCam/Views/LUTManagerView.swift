@@ -87,7 +87,7 @@ struct LUTManagerView: View {
                                 FilmEngine.shared.renameSimulation(oldName: oldLut.name, newName: newNameText)
                                 
                                 // 刷新 Camera 中的 styleOptions 列表，确保相机转盘同步更新
-                                camera.syncAllLUTsToOptions()
+                                camera.parameterManager.syncAllLUTsToOptions()
                             }
                             lutToRename = nil
                             newNameText = ""
@@ -117,14 +117,14 @@ struct LUTManagerView: View {
             let fileName = selectedURL.deletingPathExtension().lastPathComponent
             
             FilmEngine.shared.saveCustomLUTToDisk(data: lutData, name: fileName, dimension: dimension)
-            camera.syncAllLUTsToOptions()
+            camera.parameterManager.syncAllLUTsToOptions()
         }
         selectedURL.stopAccessingSecurityScopedResource()
     }
     
     func deleteLUT(_ lut: FilmSimulation) {
         FilmEngine.shared.deleteSimulation(named: lut.name)
-        camera.syncAllLUTsToOptions()
+        camera.parameterManager.syncAllLUTsToOptions()
     }
     
     func renameLUT(_ lut: FilmSimulation) {

@@ -38,6 +38,7 @@ class Camera: NSObject, ObservableObject {
     @Published var showingMENU: Bool = false
     @Published var inCameraView: Bool = true { didSet { manageSession() } }
     
+    @AppStorage("doneTheTip") var doneTheTip: Bool = false
     @AppStorage("hasCompletedTutorial") var hasCompletedTutorial: Bool = false
     @Published var isShowingTutorial: Bool = false
     
@@ -62,7 +63,7 @@ class Camera: NSObject, ObservableObject {
     func callAllStartupFuncs() {
         permissionManager.checkAllPermissions()
         motionManager.start()
-        shutterSoundManager.setupSound(named: "shutter_eqed_gained")
+        shutterSoundManager.setupSound(named: parameterManager.shutterSoundSelection.rawValue)
         
         // 1. 启动硬件
         sessionManager.initSession(with: lensManager.currentLens)
@@ -101,6 +102,13 @@ class Camera: NSObject, ObservableObject {
             .sink { [weak self] mode in
                 guard let dev = self?.lensManager.currentLens.device else { return }
                 self?.sessionManager.focusModify(mode: mode == "AF-S" ? .locked : .continuousAutoFocus, device: dev)
+            }
+            .store(in: &cancellables)
+        
+        parameterManager.$shutterSoundSelection
+            .syncChange(on: self) { [weak self] newSound in
+                self?.shutterSoundManager.setupSound(named: newSound.rawValue)
+                self?.parameterManager.saveExposureParameters()
             }
             .store(in: &cancellables)
     }

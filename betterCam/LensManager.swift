@@ -14,8 +14,8 @@ class LensManager: ObservableObject {
     @Published var currentLens: Lens
     @Published var enableFrontCamera: Bool = false
     
-    init() {
-        let (lenses, defaultLens) = LensManager.performDiscovery(enableFront: self.enableFrontCamera)
+    init(isFrontCameraEnabled: Bool = false) {
+        let (lenses, defaultLens) = LensManager.performDiscovery(enableFront: isFrontCameraEnabled)
         self.physicalLenses = lenses
         self.currentLens = defaultLens
     }

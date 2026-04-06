@@ -201,9 +201,6 @@
         }
       }
     },
-    "Enable color profile in RAW mode" : {
-
-    },
     "Enter new name" : {
       "localizations" : {
         "ja" : {
@@ -576,6 +573,7 @@
       }
     },
     "Preview Resolution" : {
+      "extractionState" : "stale",
       "localizations" : {
         "ja" : {
           "stringUnit" : {

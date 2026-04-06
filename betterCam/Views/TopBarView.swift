@@ -34,8 +34,3 @@ struct TopBarView: View {
         .font(.system(size: 14, weight: .bold, design: .monospaced))
     }
 }
-
-#Preview {
-    TopBarView()
-        .environmentObject(Camera())
-}

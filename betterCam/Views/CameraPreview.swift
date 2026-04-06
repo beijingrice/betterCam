@@ -25,11 +25,11 @@ struct CameraPreview: View {
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-                if camera.isFullyAuthorized {
+                if camera.permissionManager.isFullyAuthorized {
                     CaptureInteractionView(camera: camera)
                         .ignoresSafeArea()
                     actualPreviewLayer(in: geometry.size)
-                } else if camera.cameraPermission == .denied || camera.photoPermission == .denied {
+                } else if camera.permissionManager.cameraPermission == .denied || camera.permissionManager.photoPermission == .denied {
                     // 💡 只要有一个拒绝，就显示图文提示
                     permissionDeniedView
                 } else {
@@ -44,7 +44,7 @@ struct CameraPreview: View {
     private func actualPreviewLayer(in size: CGSize) -> some View {
         ZStack {
             // 1. 底层预览图
-            if let image = camera.currentPreviewImage {
+            if let image = camera.sessionManager.currentPreviewImage {
                 Image(image, scale: 1.0, orientation: .up, label: Text("Preview"))
                     .resizable()
                     .aspectRatio(aspectRatio, contentMode: .fit)
@@ -54,7 +54,7 @@ struct CameraPreview: View {
             
             ZStack(alignment: .bottomTrailing) { // 锁定右下角
                 Color.clear // 撑开空间
-                WaveformOverlay(camera: camera)
+                WaveformOverlay()
                     .padding(.bottom, 40)  // 距离底部边距
                     .padding(.trailing, 0) // 距离右侧边距
                     .transition(.opacity)
@@ -62,7 +62,7 @@ struct CameraPreview: View {
             
             ZStack(alignment: .bottomTrailing) { // 锁定右下角
                 Color.clear // 撑开空间
-                HistogramOverlay(camera: camera)
+                HistogramOverlay()
                     .padding(.bottom, 40)  // 距离底部边距
                     .padding(.trailing, 0) // 距离右侧边距
                     .transition(.opacity)
@@ -128,8 +128,8 @@ struct CameraPreview: View {
 
             // 💡 动态显示缺失哪个权限
             VStack(alignment: .leading, spacing: 8) {
-                permissionRow(label: NSLocalizedString("CAMERA_ACCESS", tableName: "Localizable_variable" ,comment: ""), granted: camera.cameraPermission == .authorized)
-                permissionRow(label: NSLocalizedString("PHOTO_LIB_ACCESS", tableName: "Localizable_variable" ,comment: ""), granted: camera.photoPermission == .authorized)
+                permissionRow(label: NSLocalizedString("CAMERA_ACCESS", tableName: "Localizable_variable" ,comment: ""), granted: camera.permissionManager.cameraPermission == .authorized)
+                permissionRow(label: NSLocalizedString("PHOTO_LIB_ACCESS", tableName: "Localizable_variable" ,comment: ""), granted: camera.permissionManager.photoPermission == .authorized)
             }
             .padding()
 

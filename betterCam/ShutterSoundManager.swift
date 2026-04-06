@@ -9,10 +9,6 @@ import AudioToolbox // 💡 必须导入这个来处理 SystemSoundID
 
 // TODO: Implement calls to this class in camera.swift
 
-// TODO: Save shutter sound prefered
-// private var oldShutterSoundMode: ShutterSoundMode = .sony
-// @AppStorage("shutterSoundMode") var shutterSoundMode: ShutterSoundMode = .sony
-
 class ShutterSoundManager {
     private var shutterSoundID: SystemSoundID = 0
     

@@ -18,7 +18,7 @@ struct ScreenView: View {
             CameraPreview()
                 .background(Color.black)
             VStack(spacing: 0) {
-                if camera.isFullyAuthorized {
+                if camera.permissionManager.isFullyAuthorized {
                     TopBarView()
                     Spacer()
                     BottomBarView()

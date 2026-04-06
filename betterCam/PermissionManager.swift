@@ -12,6 +12,9 @@ import Photos
 class PermissionManager {
     var cameraPermission: CameraPermissionStatus = .denied
     var photoPermission: CameraPermissionStatus = .denied
+    var isFullyAuthorized: Bool {
+        return (cameraPermission == .authorized) && (photoPermission == .authorized)
+    }
     
     func checkPhotoLibraryPermission() {
         let status = PHPhotoLibrary.authorizationStatus(for: .addOnly)

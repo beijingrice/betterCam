@@ -31,9 +31,19 @@ class ParameterManager: ObservableObject {
     let EVOptions: [String] = ParameterAvailable.EVoptions
     // TODO: Pass lens SS & ISO info to lists above
         
-    // 💡 2. 搬迁持久化配置（直接用 @AppStorage 自动同步）
+    // Apply changes in next launch, okay with @AppStorage
     @AppStorage("enablePermanentParameterStorage") var enablePermanentStorage: Bool = false
+    let enablePermanentParameterStorageKey: String = "enablePermanentParameterStorage"
     @AppStorage("perferAUTO") var perferAUTO: Bool = false
+    let perferAUTOKey: String = "perferAUTO"
+    
+    // Apply changes immediately, requires UserDefaults & @Published
+    @Published var enableFrontCamera: Bool = false
+    let enableFrontCameraKey: String = "enableFrontCamera"
+    @Published var shutterSoundSelection: ShutterSoundMode = .sony
+    let shutterSoundSelectionKey: String = "shutterSoundSelection"
+    
+    // UserDefaults, but shared with home screen widget
     let prefs = UserDefaults(suiteName: "group.com.rice.betterCam")
         
     private var cancellables = Set<AnyCancellable>()
@@ -46,7 +56,7 @@ class ParameterManager: ObservableObject {
     init() {
         // 启动时自动加载
         syncAllLUTsToOptions()
-        loadParameters()
+        loadExposureParameters()
         setupAutoSync()
         setupAutoModeLogic() // 💡 注册联动监听
     }
@@ -67,7 +77,7 @@ class ParameterManager: ObservableObject {
     }
         
     // 💡 3. 参数持久化逻辑
-    func saveParameters() {
+    func saveExposureParameters() {
         guard enablePermanentStorage else { return }
         UserDefaults.standard.set(SS, forKey: "SS")
         UserDefaults.standard.set(ISO, forKey: "ISO")
@@ -75,8 +85,18 @@ class ParameterManager: ObservableObject {
         prefs?.set(ISO, forKey: "last_ISO")
         WidgetCenter.shared.reloadAllTimelines()
     }
+    
+    func savePublishedParameters() {
+        UserDefaults.standard.set(enableFrontCamera, forKey: enableFrontCameraKey)
+        UserDefaults.standard.setEnum(shutterSoundSelection, forKey: shutterSoundSelectionKey)
+    }
+    
+    func loadPublishedParameters() {
+        self.enableFrontCamera = UserDefaults.standard.bool(forKey: enableFrontCameraKey)
+        self.shutterSoundSelection = UserDefaults.standard.getEnum(type: ShutterSoundMode.self, forKey: shutterSoundSelectionKey) ?? .sony
+    }
         
-    func loadParameters() {
+    func loadExposureParameters() {
         if perferAUTO {
             self.SS = "AUTO"
             self.ISO = "AUTO"
@@ -99,7 +119,7 @@ class ParameterManager: ObservableObject {
         // 监听所有可能需要存盘的参数
         Publishers.CombineLatest($SS, $ISO)
                     .debounce(for: .seconds(1), scheduler: RunLoop.main)
-                    .sink { [weak self] _, _ in self?.saveParameters() }
+                    .sink { [weak self] _, _ in self?.saveExposureParameters() }
                     .store(in: &cancellables)
     }
     
@@ -144,5 +164,32 @@ class ParameterManager: ObservableObject {
         } else if newISO != "AUTO" && SS == "AUTO" {
             SS = lastSS
         }
+    }
+}
+
+extension UserDefaults { // enum packaging
+    func setEnum<T: RawRepresentable>(_ value: T, forKey key: String) where T.RawValue == String {
+        set(value.rawValue, forKey: key)
+    }
+    
+    func getEnum<T: RawRepresentable>(type: T.Type, forKey key: String) -> T? where T.RawValue == String {
+        guard let rawValue = string(forKey: key) else { return nil }
+        return T(rawValue: rawValue)
+    }
+}
+
+extension Publisher where Failure == Never, Output: Equatable {
+    func syncChange(
+        on object: AnyObject,
+        action: @escaping (Output) -> Void
+    ) -> AnyCancellable {
+        return self
+            .dropFirst()
+            .removeDuplicates()
+            .receive(on: DispatchQueue.main)
+            .sink { [weak object] newValue in
+                guard object != nil else { return }
+                action(newValue)
+            }
     }
 }
