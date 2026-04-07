@@ -23,6 +23,7 @@ class SessionManager: NSObject {
     private var exposureOffsetObserver: NSKeyValueObservation?
     private var smoothedOffset: Float = 0.0
     private var lastUpdateTimestamp: TimeInterval = 0
+    private var physicalStreamingPosition: AVCaptureDevice.Position = .back
     
     func initSession(with lens: Lens) {
         sessionQueue.async { [weak self] in
@@ -46,8 +47,12 @@ class SessionManager: NSObject {
             } catch { print("Init input failed!") }
             
             self.session.commitConfiguration()
+            self.physicalStreamingPosition = lens.device.position
+            self.delegate?.refreshLensCapabilities() 
             self.session.startRunning()
             self.setupLightMeter(for: lens.device)
+            
+            
         }
     }
     
@@ -67,6 +72,7 @@ class SessionManager: NSObject {
                 print("Switch input failed!")
             }
             self.session.commitConfiguration()
+            self.physicalStreamingPosition = device.position
         }
     }
     
@@ -97,8 +103,12 @@ class SessionManager: NSObject {
                 
                 if isManual {
                     let duration = self?.parseShutterSpeed(currentSS) ?? AVCaptureDevice.currentExposureDuration
-                    let cleanISO = currentISO.replacingOccurrences(of: "ISO ", with: "")
-                    let isoValue = Float(cleanISO) ?? 100.0
+                    var isoValue = Float(currentISO) ?? 100.0
+                    if isoValue > camera.lensManager.currentLens.maxISO {
+                        isoValue = camera.lensManager.currentLens.maxISO
+                    } else if isoValue < camera.lensManager.currentLens.minISO {
+                        isoValue = camera.lensManager.currentLens.minISO
+                    }
                     device.setExposureModeCustom(duration: duration, iso: isoValue, completionHandler: nil)
                 } else {
                     if let evValue = Float(currentEV) {
@@ -251,8 +261,7 @@ extension SessionManager: AVCaptureVideoDataOutputSampleBufferDelegate { // live
         var ciImage = CIImage(cvPixelBuffer: pixelBuffer)
         
         
-        if let currentLens = self.delegate?.lensManager.currentLens,
-           currentLens.device.position == .front {
+        if self.physicalStreamingPosition == .front {
             ciImage = ciImage.oriented(.downMirrored)
         }
         

@@ -11,8 +11,11 @@ struct Lens {
     let device: AVCaptureDevice
     let equivalentFocalLength: Int
     let aperture: String
-    let availableSSoptions: [String]
-    let availableISOoptions: [String]
+    var availableSSoptions: [String]
+    var availableISOoptions: [String]
+    var maxISO: Float
+    var minISO: Float
+    var displayName: String?
     
     init(device: AVCaptureDevice) {
         self.device = device
@@ -20,6 +23,21 @@ struct Lens {
         self.equivalentFocalLength = Lens.getFocalLength(device: device)
         self.availableSSoptions = ParameterAvailable.SSoptions.supportedSS(for: device)
         self.availableISOoptions = ParameterAvailable.ISOoptions.supportedISO(for: device)
+        let numericISOs = self.availableISOoptions.compactMap { Float($0) }
+        self.minISO = numericISOs.min() ?? device.activeFormat.minISO
+        self.maxISO = numericISOs.max() ?? device.activeFormat.maxISO
+        print("minISO\(self.minISO) maxISO\(self.maxISO)")
+        self.displayName = nil
+    }
+    
+    mutating func refreshCapabilities() {
+        self.availableSSoptions = ParameterAvailable.SSoptions.supportedSS(for: device)
+        self.availableISOoptions = ParameterAvailable.ISOoptions.supportedISO(for: device)
+        
+        let numericISOs = self.availableISOoptions.compactMap { Float($0) }
+        self.minISO = numericISOs.min() ?? device.activeFormat.minISO
+        self.maxISO = numericISOs.max() ?? device.activeFormat.maxISO
+        print("✅ Lens 已刷新极限: \(self.minISO) ~ \(self.maxISO)")
     }
     
     static func getAperture(device: AVCaptureDevice) -> String {

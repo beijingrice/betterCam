@@ -9,8 +9,14 @@ struct KnurledDialView: View {
     @State private var hapticAccumulator: Double = 0
     
     private let dialSize: CGFloat = 140
-    private let stepDegrees: Double = 45
     private let midButtonSize: CGFloat = 55
+    
+    private var dynamicStepDegrees: Double {
+        if camera.activeIndex == UIWidgets.lensSwitch.rawValue {
+            return 90.0
+        }
+        return 45.0
+    }
     
     var body: some View {
         ZStack {
@@ -144,15 +150,18 @@ struct KnurledDialView: View {
                 
                 // 6. 步进逻辑：每 30 度触发反馈并切换参数
                 hapticAccumulator += deltaInDegrees
-                if abs(hapticAccumulator) >= stepDegrees {
+        
+                let threshold = dynamicStepDegrees
+        
+                if abs(hapticAccumulator) >= threshold {
                     triggerFeedback()
                     if hapticAccumulator > 0 {
-                        camera.changeParameter(direction: 1)
+                        changeParameter(for: camera, direction: 1)
                     } else {
-                        camera.changeParameter(direction: -1)
+                        changeParameter(for: camera, direction: -1)
                     }
                     // 这种写法支持快速旋转时连续触发
-                    hapticAccumulator = hapticAccumulator.truncatingRemainder(dividingBy: stepDegrees)
+                    hapticAccumulator = hapticAccumulator.truncatingRemainder(dividingBy: threshold)
                 }
                 
                 lastGestureAngle = currentAngle

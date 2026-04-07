@@ -48,6 +48,8 @@ struct CameraPreview: View {
                 Image(image, scale: 1.0, orientation: .up, label: Text("Preview"))
                     .resizable()
                     .aspectRatio(aspectRatio, contentMode: .fit)
+                    .blur(radius: camera.isSwitchingLens ? 30 : 0)
+                    .clipped()
             } else {
                 Color.black
             }

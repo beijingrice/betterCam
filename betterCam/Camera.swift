@@ -35,14 +35,15 @@ class Camera: NSObject, ObservableObject {
             }
         }
     }
+    // Camera App Status
     @Published var isCapturing: Bool = false
     @Published var isShowingMenu = false { didSet { manageSession() } }
-    @Published var showingMENU: Bool = false
     @Published var inCameraView: Bool = true { didSet { manageSession() } }
-    
     @AppStorage("doneTheTip") var doneTheTip: Bool = false
     @AppStorage("hasCompletedTutorial") var hasCompletedTutorial: Bool = false
     @Published var isShowingTutorial: Bool = false
+    
+    @Published var isSwitchingLens: Bool = false // Blur the lens when switching
     
     // 特效参数
     @Published var lutIntensity: Float = 1.0
@@ -53,7 +54,7 @@ class Camera: NSObject, ObservableObject {
     
     override init() {
         super.init()
-        sessionManager.delegate = self
+        sessionManager.delegate = self // pass camera instance to sessionManager
         
         if hasCompletedTutorial {
             callAllStartupFuncs()
@@ -80,10 +81,26 @@ class Camera: NSObject, ObservableObject {
     private func setupBindings() {
         // 💡 监听镜头切换 -> 换硬件输入 + 自动刷新光圈/焦距
         lensManager.$currentLens
-            .receive(on: DispatchQueue.main)
+            .dropFirst() // 忽略 App 启动时的第一次通知，因为 callAllStartupFuncs 已处理
+            .debounce(for: .seconds(0.2), scheduler: DispatchQueue.main) // 💡 核心防抖：用户停下轮子 0.3 秒后才放行！
             .sink { [weak self] newLens in
-                self?.sessionManager.switchInput(to: newLens.device)
-                self?.updateUIWithLens(newLens)
+                guard let self = self else { return }
+                
+                // 1. 瞬间开启模糊过场
+                withAnimation(.easeInOut(duration: 0.3)) {
+                    self.isSwitchingLens = true
+                }
+                
+                // 2. 真正执行重负荷的底层硬件切换
+                self.sessionManager.switchInput(to: newLens.device)
+                self.updateUIWithLens(newLens)
+                
+                // 3. 硬件准备好后，撤销模糊
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        self.isSwitchingLens = false
+                    }
+                }
             }
             .store(in: &cancellables)
             
@@ -115,6 +132,20 @@ class Camera: NSObject, ObservableObject {
             .store(in: &cancellables)
     }
     
+    func refreshLensCapabilities() {
+        // 1. 让当前镜头自我刷新（去读 6400 的极限）
+        lensManager.currentLens.refreshCapabilities()
+        
+        // 2. 🚨 极其重要：把刷新后的新镜头塞回 LensManager 的数组里替换掉旧的！
+        // 否则你切一次镜头再切回来，它又会变成 4000
+        if let index = lensManager.physicalLenses.firstIndex(where: { $0.device.uniqueID == lensManager.currentLens.device.uniqueID }) {
+            lensManager.physicalLenses[index] = lensManager.currentLens
+        }
+        
+        // 3. 把最新鲜的数据推给 UI
+        updateUIWithLens(lensManager.currentLens)
+    }
+    
     // 💡 一个辅助函数，把镜头的物理属性传递给参数管家
     private func updateUIWithLens(_ lens: Lens) {
         parameterManager.actualSSoptions = lens.availableSSoptions
@@ -129,7 +160,7 @@ class Camera: NSObject, ObservableObject {
         isCapturing = true
         sessionManager.capturePhoto(orientation: motionManager.deviceOrientation, userSettings: (
             parameterManager.imageQuality,
-            lensManager.currentLens.device.position == .front
+            lensManager.currentLens.device.position == .front // check if using front cam
         ))
         shutterSoundManager.play()
         UIImpactFeedbackGenerator(style: .heavy).impactOccurred()

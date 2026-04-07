@@ -16,10 +16,7 @@ struct TopBarView: View {
             Group {
                 ParameterItem(title: pm.imageQuality, index: UIWidgets.imageQuality.rawValue)
                 Spacer()
-                ParameterItem(
-                    title: String(lm.currentLens.equivalentFocalLength) + "mm",
-                    index: UIWidgets.lensSwitch.rawValue
-                )
+                ParameterItem(title: lm.currentLens.displayName ?? String(lm.currentLens.equivalentFocalLength) + "mm", index: UIWidgets.lensSwitch.rawValue)
                 Spacer()
                 ParameterItem(title: pm.AFMode, index: UIWidgets.AFMode.rawValue)
                 Spacer()

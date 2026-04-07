@@ -13,7 +13,7 @@ import WidgetKit
 class ParameterManager: ObservableObject {
     // 💡 1. 搬迁参数状态
     @Published var SS: String = "1/200"
-    @Published var ISO: String = "ISO 100"
+    @Published var ISO: String = "100"
     @Published var EV: String = "0.0"
     @Published var style: String = "STD"
     @Published var imageQuality: String = "JPEG"
