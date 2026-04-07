@@ -13,6 +13,8 @@ class Camera: NSObject, ObservableObject {
     var permissionManager = PermissionManager()
     var motionManager = MotionManager() // 💡 新加入的陀螺仪管家
     
+    @Published var currentPreviewImage: CGImage?
+    
     private var cancellables = Set<AnyCancellable>()
     
     // MARK: - UI 交互状态

@@ -12,7 +12,6 @@ import Combine
 class LensManager: ObservableObject {
     @Published var physicalLenses: [Lens] = []
     @Published var currentLens: Lens
-    @Published var enableFrontCamera: Bool = false
     
     init(isFrontCameraEnabled: Bool = false) {
         let (lenses, defaultLens) = LensManager.performDiscovery(enableFront: isFrontCameraEnabled)
@@ -20,8 +19,8 @@ class LensManager: ObservableObject {
         self.currentLens = defaultLens
     }
     
-    func discoverCameras() {
-        let (lenses, defaultLens) = LensManager.performDiscovery(enableFront: self.enableFrontCamera)
+    func discoverCameras(enableFrontCamera: Bool) {
+        let (lenses, defaultLens) = LensManager.performDiscovery(enableFront: enableFrontCamera)
         self.physicalLenses = lenses
         self.currentLens = defaultLens
     }

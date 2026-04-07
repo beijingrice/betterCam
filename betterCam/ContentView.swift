@@ -57,11 +57,15 @@ struct ContentView: View {
             set: { if $0 == false { camera.inCameraView = true } }
         )) {
             LUTManagerView(camera: camera)
+                .environmentObject(camera.parameterManager) // 💡 必须加上这句！
+                .environmentObject(camera.lensManager)
         }
         .fullScreenCover(isPresented: Binding(
             get: {camera.isShowingMenu},
             set: { if $0 == true { camera.isShowingMenu = false }} )) {
                 MenuView(camera: camera)
+                    .environmentObject(camera.parameterManager) // 💡 必须加上这句！
+                    .environmentObject(camera.lensManager)
             }
     }
 }
@@ -121,11 +125,15 @@ struct ContentViewPortrait: View {
                 set: { if $0 == false { camera.inCameraView = true } }
             )) {
                 LUTManagerView(camera: camera)
+                    .environmentObject(camera.parameterManager) // 💡 必须加上这句！
+                    .environmentObject(camera.lensManager)
             }
             .fullScreenCover(isPresented: Binding(
                 get: {camera.isShowingMenu},
                 set: { if $0 == true { camera.isShowingMenu = false }} )) {
                     MenuView(camera: camera)
+                        .environmentObject(camera.parameterManager) // 💡 必须加上这句！
+                        .environmentObject(camera.lensManager)
                 }
             // END OF PROPERTIES
         }

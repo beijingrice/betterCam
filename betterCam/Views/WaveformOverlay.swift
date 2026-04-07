@@ -1,20 +1,21 @@
 import SwiftUI
 
 struct WaveformOverlay: View {
+    @ObservedObject var processor = MetalWHProcessor.shared
     var body: some View {
         // 只有开启且有数据时才显示
-        if MetalWHProcessor.shared.exposureIndicatorMode == .waveform, let cgImage = MetalWHProcessor.shared.waveformImage {
+        if processor.exposureIndicatorMode == .waveform, let cgImage = processor.waveformImage {
             ZStack(alignment: .bottom) {
                 // 背景：器材感的半透明黑
                 Color.black.opacity(0.5)
-                    .frame(width: CGFloat(MetalWHProcessor.shared.overlayWidth), height: CGFloat(MetalWHProcessor.shared.overlayHeight))
+                    .frame(width: CGFloat(processor.overlayWidth), height: CGFloat(processor.overlayHeight))
                     .cornerRadius(4)
                 
                 // 核心：渲染 Metal 生成的统计图
                 Image(cgImage, scale: 1.0, orientation: .up, label: Text("Waveform"))
                     .resizable()
                     .renderingMode(.template)
-                    .frame(width: CGFloat(MetalWHProcessor.shared.overlayWidth), height: CGFloat(MetalWHProcessor.shared.overlayHeight))
+                    .frame(width: CGFloat(processor.overlayWidth), height: CGFloat(processor.overlayHeight))
                     .blendMode(.screen)      // 叠加模式
                 
                 // 辅助线：0%, 50%, 100% 亮度刻度
@@ -25,7 +26,7 @@ struct WaveformOverlay: View {
                     Spacer()
                     Rectangle().fill(Color.white.opacity(0.2)).frame(height: 1)
                 }
-                .frame(width: CGFloat(MetalWHProcessor.shared.overlayWidth), height: CGFloat(MetalWHProcessor.shared.overlayHeight))
+                .frame(width: CGFloat(processor.overlayWidth), height: CGFloat(processor.overlayHeight))
             }
             .overlay(RoundedRectangle(cornerRadius: 4).stroke(Color.white.opacity(0.2), lineWidth: 0.5))
         }

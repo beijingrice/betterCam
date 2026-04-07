@@ -40,7 +40,7 @@ class MetalWHProcessor: ObservableObject {
             CVMetalTextureCacheCreate(kCFAllocatorDefault, nil, device, nil, &textureCache)
         }
         
-        
+        setupPipelines()
     }
     
     private func setupPipelines() {
@@ -54,7 +54,7 @@ class MetalWHProcessor: ObservableObject {
             histogramPipeline = try? device.makeComputePipelineState(function: histKernel)
         }
         
-        histogramBuffer = device.makeBuffer(length: 128 * MemoryLayout<UInt32>.stride, options: .storageModeShared)
+        histogramBuffer = device.makeBuffer(length: 256 * MemoryLayout<UInt32>.stride, options: .storageModeShared)
     }
     
     func process(pixelBuffer: CVPixelBuffer) {
@@ -124,7 +124,7 @@ class MetalWHProcessor: ObservableObject {
             guard let self = self else { return }
             let cgImage = self.makeCGImage(from: outputTexture)
             DispatchQueue.main.async {
-                self.waveformImage = cgImage
+                self.waveformImage = cgImage // storage target view
             }
         }
         commandBuffer.commit()
@@ -136,7 +136,9 @@ class MetalWHProcessor: ObservableObject {
               let pipeline = histogramPipeline,
               let queue = commandQueue,
               let cache = textureCache,
-              let hBuffer = histogramBuffer else { return }
+              let hBuffer = histogramBuffer else {
+            print("🚨 嫌疑人1：管道拦截！看看是谁 nil? Pipeline: \(histogramPipeline != nil), Buffer: \(histogramBuffer != nil)")
+            return }
 
         let width = CVPixelBufferGetWidth(pixelBuffer)
         let height = CVPixelBufferGetHeight(pixelBuffer)
@@ -163,15 +165,18 @@ class MetalWHProcessor: ObservableObject {
 
         encoder.dispatchThreadgroups(gridSize, threadsPerThreadgroup: threadsPerGroup)
         encoder.endEncoding()
-
-        commandBuffer.addCompletedHandler { [weak self] _ in
-            self?.renderHistogramUI()
-        }
+        
         commandBuffer.commit()
+        
+        commandBuffer.waitUntilCompleted()
+        self.renderHistogramUI()
+        
     }
 
     private func renderHistogramUI() {
-        guard let buffer = histogramBuffer else { return }
+        guard let buffer = histogramBuffer else {
+            print("🚨 嫌疑人3：Buffer 为空，直接退出了！")
+            return }
         let ptr = buffer.contents().bindMemory(to: UInt32.self, capacity: 256)
         
         var maxCount: Float = 1.0
@@ -197,6 +202,8 @@ class MetalWHProcessor: ObservableObject {
                 ctx.fill(CGRect(x: CGFloat(x), y: size.height - barHeight, width: 1.0, height: barHeight))
             }
         }
+        
+        print("🚨 嫌疑人2：生成的 CGImage 是不是 nil？ \(image.cgImage == nil)") // 看看是不是这里变成了 nil
 
         DispatchQueue.main.async {
             self.histogramImage = image.cgImage

@@ -7,7 +7,7 @@
 
 #include <metal_stdlib>
 using namespace metal;
-kernel void histogram_compute(texture2d<float, access::read> inTexture [[texture(0)]],
+kernel void histKernel(texture2d<float, access::read> inTexture [[texture(0)]],
                               device uint *histogramBuffer [[buffer(0)]],
                               uint2 gid [[thread_position_in_grid]]) {
     if (gid.x >= inTexture.get_width() || gid.y >= inTexture.get_height()) return;

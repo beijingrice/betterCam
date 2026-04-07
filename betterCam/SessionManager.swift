@@ -16,7 +16,6 @@ class SessionManager: NSObject {
     private let photoOutput = AVCapturePhotoOutput()
     private let videoDataOutput = AVCaptureVideoDataOutput()
     private let context = CIContext()
-    @Published var currentPreviewImage: CGImage?
     
     weak var delegate: Camera?
     
@@ -29,6 +28,7 @@ class SessionManager: NSObject {
         sessionQueue.async { [weak self] in
             guard let self = self else { return }
             self.session.beginConfiguration()
+            self.session.sessionPreset = .photo
             self.session.inputs.forEach { self.session.removeInput($0) }
             
             if self.session.canAddOutput(self.videoDataOutput) {
@@ -253,7 +253,7 @@ extension SessionManager: AVCaptureVideoDataOutputSampleBufferDelegate { // live
         
         if let currentLens = self.delegate?.lensManager.currentLens,
            currentLens.device.position == .front {
-            ciImage = ciImage.oriented(.upMirrored)
+            ciImage = ciImage.oriented(.downMirrored)
         }
         
         // MARK: Pipeline STEP 3
@@ -268,7 +268,7 @@ extension SessionManager: AVCaptureVideoDataOutputSampleBufferDelegate { // live
         
         if let cgImage = context.createCGImage(finalImage, from: finalImage.extent) {
             DispatchQueue.main.async {
-                self.currentPreviewImage = cgImage
+                camera.currentPreviewImage = cgImage
             }
         }
     }

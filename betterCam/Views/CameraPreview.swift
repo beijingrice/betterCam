@@ -44,7 +44,7 @@ struct CameraPreview: View {
     private func actualPreviewLayer(in size: CGSize) -> some View {
         ZStack {
             // 1. 底层预览图
-            if let image = camera.sessionManager.currentPreviewImage {
+            if let image = camera.currentPreviewImage {
                 Image(image, scale: 1.0, orientation: .up, label: Text("Preview"))
                     .resizable()
                     .aspectRatio(aspectRatio, contentMode: .fit)

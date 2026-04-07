@@ -12,6 +12,9 @@ struct MenuView: View {
     
     @EnvironmentObject var storeManager: StoreManager
     
+    @EnvironmentObject var pm: ParameterManager // 💡 新增
+    @EnvironmentObject var lm: LensManager      // 💡 新增
+    
     @State private var showThanksAlert: Bool = false
     @State private var showRestoredMsg: Bool = false
     
@@ -77,18 +80,18 @@ struct MenuView: View {
                 .font(.caption.bold())
                 .foregroundColor(.gray)
             HStack(spacing: 0) {
-                SegmentedButton(title: ENABLE, isSelected: camera.parameterManager.enableFrontCamera) {
+                SegmentedButton(title: ENABLE, isSelected: pm.enableFrontCamera) {
                     haptic(.medium)
                     DispatchQueue.main.async {
-                        camera.parameterManager.enableFrontCamera = true
-                        camera.lensManager.discoverCameras()
+                        pm.enableFrontCamera = true
+                        lm.discoverCameras(enableFrontCamera: true)
                     }
                 }
-                SegmentedButton(title: DISABLE, isSelected: !camera.parameterManager.enableFrontCamera) {
+                SegmentedButton(title: DISABLE, isSelected: !pm.enableFrontCamera) {
                     haptic(.medium)
                     DispatchQueue.main.async {
-                        camera.parameterManager.enableFrontCamera = false
-                        camera.lensManager.discoverCameras()
+                        pm.enableFrontCamera = false
+                        camera.lensManager.discoverCameras(enableFrontCamera: false)
                     }
                 }
             }
@@ -102,13 +105,13 @@ struct MenuView: View {
             Text("Shutter Sound")
                 .font(.caption.bold()).foregroundColor(.gray)
             HStack(spacing: 0) {
-                SegmentedButton(title: "1", isSelected: camera.parameterManager.shutterSoundSelection == .sony) {
+                SegmentedButton(title: "1", isSelected: pm.shutterSoundSelection == .sony) {
                     haptic(.medium)
-                    camera.parameterManager.shutterSoundSelection = .sony
+                    pm.shutterSoundSelection = .sony
                 }
-                SegmentedButton(title: "2", isSelected: camera.parameterManager.shutterSoundSelection == .panasonic) {
+                SegmentedButton(title: "2", isSelected: pm.shutterSoundSelection == .panasonic) {
                     haptic(.medium)
-                    camera.parameterManager.shutterSoundSelection = .panasonic
+                    pm.shutterSoundSelection = .panasonic
                 }
             }
             .background(Color.white.opacity(0.1)).cornerRadius(roundedCornerRadius)
@@ -120,14 +123,14 @@ struct MenuView: View {
             Text("Save shutter speed and ISO from last session")
                 .font(.caption.bold()).foregroundColor(.gray)
             HStack(spacing: 0) {
-                SegmentedButton(title: ENABLE, isSelected: camera.parameterManager.enablePermanentStorage, isDisabled: camera.parameterManager.perferAUTO) {
+                SegmentedButton(title: ENABLE, isSelected: pm.enablePermanentStorage, isDisabled: pm.perferAUTO) {
                     haptic(.medium)
-                    camera.parameterManager.enablePermanentStorage = true
-                    camera.parameterManager.saveExposureParameters()
+                    pm.enablePermanentStorage = true
+                    pm.saveExposureParameters()
                 }
-                SegmentedButton(title: DISABLE, isSelected: !camera.parameterManager.enablePermanentStorage, isDisabled: camera.parameterManager.perferAUTO) {
+                SegmentedButton(title: DISABLE, isSelected: !pm.enablePermanentStorage, isDisabled: pm.perferAUTO) {
                     haptic(.medium)
-                    camera.parameterManager.enablePermanentStorage = false
+                    pm.enablePermanentStorage = false
                 }
             }
             .background(Color.white.opacity(0.1)).cornerRadius(roundedCornerRadius)
@@ -139,12 +142,12 @@ struct MenuView: View {
             Text("Prefer AUTO mode when launched")
                 .font(.caption.bold()).foregroundColor(.gray)
             HStack(spacing: 0) {
-                SegmentedButton(title: ENABLE, isSelected: camera.parameterManager.perferAUTO) {
-                    camera.parameterManager.perferAUTO = true
-                    camera.parameterManager.enablePermanentStorage = false
+                SegmentedButton(title: ENABLE, isSelected: pm.perferAUTO) {
+                    pm.perferAUTO = true
+                    pm.enablePermanentStorage = false
                 }
-                SegmentedButton(title: DISABLE, isSelected: !camera.parameterManager.perferAUTO) {
-                    camera.parameterManager.perferAUTO = false
+                SegmentedButton(title: DISABLE, isSelected: !pm.perferAUTO) {
+                    pm.perferAUTO = false
                 }
             }
             .background(Color.white.opacity(0.1)).cornerRadius(roundedCornerRadius)

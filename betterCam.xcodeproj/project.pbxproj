@@ -12,7 +12,6 @@
 		1A6C41372F3732B500DCE6AB /* WidgetKit.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1A6C41362F3732B500DCE6AB /* WidgetKit.framework */; };
 		1A6C41392F3732B500DCE6AB /* SwiftUI.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1A6C41382F3732B500DCE6AB /* SwiftUI.framework */; };
 		1A6C414A2F3732B600DCE6AB /* BetterCamWidgetsExtension.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 1A6C41342F3732B500DCE6AB /* BetterCamWidgetsExtension.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
-		1ABA83B92F80FC4D00304632 /* SessionManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1ABA83B82F80FC4D00304632 /* SessionManager.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -62,7 +61,6 @@
 		1AB07E432F21F48200CBA2B6 /* betterCam.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = betterCam.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		1AB07E502F21F48300CBA2B6 /* betterCamTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = betterCamTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		1AB07E5A2F21F48300CBA2B6 /* betterCamUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = betterCamUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		1ABA83B82F80FC4D00304632 /* SessionManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionManager.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -174,7 +172,6 @@
 		1AB07E3A2F21F48200CBA2B6 = {
 			isa = PBXGroup;
 			children = (
-				1ABA83B82F80FC4D00304632 /* SessionManager.swift */,
 				1A5DA7A92F4574BC003512B0 /* BetterCamWidgetsExtension.entitlements */,
 				1A442D4E2F2BAEFE00EADEE3 /* Localizable.xcstrings */,
 				1AB07E452F21F48200CBA2B6 /* betterCam */,
@@ -387,7 +384,6 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				1ABA83B92F80FC4D00304632 /* SessionManager.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
