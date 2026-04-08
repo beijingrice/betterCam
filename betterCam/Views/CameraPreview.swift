@@ -54,6 +54,10 @@ struct CameraPreview: View {
                 Color.black
             }
             
+            Color.black
+                .opacity(camera.isSensorBusy ? 1.0 : 0.0)
+                .animation(camera.isSensorBusy ? .none : .easeOut(duration: 0.2), value: camera.isSensorBusy)
+            
             ZStack(alignment: .bottomTrailing) { // 锁定右下角
                 Color.clear // 撑开空间
                 WaveformOverlay()

@@ -59,8 +59,11 @@ class ParameterManager: ObservableObject {
         // 启动时自动加载
         syncAllLUTsToOptions()
         loadExposureParameters()
+        loadPublishedParameters()
         setupAutoSync()
         setupAutoModeLogic() // 💡 注册联动监听
+        setupSettingsSync()
+        
     }
     
     func syncAllLUTsToOptions() {
@@ -117,6 +120,18 @@ class ParameterManager: ObservableObject {
             if self.SS != "AUTO" { self.lastSS = self.SS }
             if self.ISO != "AUTO" { self.lastISO = self.ISO }
         }
+    }
+    
+    private func setupSettingsSync() {
+        // 监听这三个配置项的任何风吹草动
+        Publishers.CombineLatest3($enableFrontCamera, $isPureRawEngineEnabled, $shutterSoundSelection)
+            .dropFirst() // 忽略 init() 里面 loadPublishedParameters() 造成的初始赋值触发
+            .debounce(for: .milliseconds(300), scheduler: RunLoop.main) // 稍微加一点点防抖，防止 UI 狂点
+            .sink { [weak self] _, _, _ in
+                self?.savePublishedParameters()
+                print("✅ [ParameterManager] 设置已自动存入 UserDefaults")
+            }
+            .store(in: &cancellables)
     }
     
     private func setupAutoSync() {

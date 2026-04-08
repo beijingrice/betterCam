@@ -6,8 +6,8 @@ import UIKit
 
 class Camera: NSObject, ObservableObject {
     // MARK: - 核心模块注入 (所有打工仔)
-    @Published var lensManager = LensManager()
     @Published var parameterManager = ParameterManager()
+    @Published var lensManager = LensManager()
     var sessionManager = SessionManager()
     var shutterSoundManager = ShutterSoundManager()
     var permissionManager = PermissionManager()
@@ -71,6 +71,7 @@ class Camera: NSObject, ObservableObject {
     func callAllStartupFuncs() {
         permissionManager.checkAllPermissions()
         motionManager.start()
+        lensManager.discoverCameras(enableFrontCamera: parameterManager.enableFrontCamera)
         shutterSoundManager.setupSound(named: parameterManager.shutterSoundSelection.rawValue)
         
         // 1. 启动硬件
@@ -115,14 +116,6 @@ class Camera: NSObject, ObservableObject {
             .sink { [weak self] _, _, _ in self?.sessionManager.updateExposure() }
             .store(in: &cancellables)
             
-        // 💡 监听其他设置
-        parameterManager.$imageQuality
-            .sink { [weak self] q in
-                guard let dev = self?.lensManager.currentLens.device else { return }
-                self?.sessionManager.HDRswitch(q != "DNG", device: dev)
-            }
-            .store(in: &cancellables)
-            
         parameterManager.$AFMode
             .sink { [weak self] mode in
                 guard let dev = self?.lensManager.currentLens.device else { return }
@@ -136,6 +129,12 @@ class Camera: NSObject, ObservableObject {
                 self?.parameterManager.saveExposureParameters()
             }
             .store(in: &cancellables)
+        
+        parameterManager.$isPureRawEngineEnabled
+            .syncChange(on: self) { [weak self] isPureRawEngineEnabled in
+                guard let self = self else { return }
+                self.sessionManager.HDRswitch(isPureRawEngineEnabled, device: self.lensManager.currentLens.device)
+            }
     }
     
     func refreshLensCapabilities() {

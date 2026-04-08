@@ -50,7 +50,6 @@ class SessionManager: NSObject {
             
             self.session.commitConfiguration()
             self.physicalStreamingPosition = lens.device.position
-            self.delegate?.refreshLensCapabilities() 
             self.session.startRunning()
             self.setupLightMeter(for: lens.device)
             
@@ -114,7 +113,11 @@ class SessionManager: NSObject {
                     device.setExposureModeCustom(duration: duration, iso: isoValue, completionHandler: nil)
                 } else {
                     if let evValue = Float(currentEV) {
-                        device.setExposureTargetBias(evValue, completionHandler: nil)
+                        if camera.parameterManager.isPureRawEngineEnabled {
+                            device.setExposureTargetBias(evValue - 0.5, completionHandler: nil) // Protect highlight
+                        } else {
+                            device.setExposureTargetBias(evValue, completionHandler: nil)
+                        }
                     }
                     device.exposureMode = .continuousAutoExposure
                 }
@@ -308,9 +311,9 @@ extension SessionManager: AVCapturePhotoCaptureDelegate { // photo stream
         }
     }
     
-    func photoOutput(_ output: AVCapturePhotoOutput, didFinishCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings, error: Error?) {
-        // 无论这次拍摄是成功、失败、单拍、双拍，只要到了这里，说明流水线彻底空了！
+    func photoOutput(_ output: AVCapturePhotoOutput, didCapturePhotoFor resolvedSettings: AVCaptureResolvedPhotoSettings) {
         DispatchQueue.main.async {
+            // 立刻撤销黑屏！画面瞬间恢复！
             self.delegate?.isSensorBusy = false
         }
     }
@@ -331,12 +334,43 @@ extension SessionManager: AVCapturePhotoCaptureDelegate { // photo stream
             
             // 自己洗照片 (Zero Process)
             if pureEngine && quality != "DNG" {
-                guard let rawFilter = CIRAWFilter(imageData: rawData, identifierHint: nil),
-                      let baseCIImage = rawFilter.outputImage else { return }
+                // 💡 1. 先初始化 RAW 滤镜容器 (拆开原来的 guard let)
+                guard let rawFilter = CIRAWFilter(imageData: rawData, identifierHint: nil) else { return }
                 
-                // 这里的 render 极其耗时，但现在在后台，UI 丝毫不卡！
-                if let finalJPEGData = self?.renderFilteredJPEG(from: baseCIImage, with: metadata, camera: camera) {
-                    self?.saveImageDataToLibrary(finalJPEGData, isRaw: false)
+                // 💡 2. 注入数字暗房微调参数 (驯服 RAW)
+                // A. 强制压暗基准曝光：减去 0.5 到 0.7 档，把死白的高光强行拉回安全区
+                rawFilter.baselineExposure -= 0.4
+                
+                // B. 开启局部色调映射 (LTM)：0.5 左右能很好地平衡胶片感与宽容度
+                rawFilter.localToneMapAmount = 0.5
+                
+                // 💡 3. 参数注入完毕，生成最终的线性图像
+                guard let baseCIImage = rawFilter.outputImage else { return }
+                
+                if camera.parameterManager.style == "STD" {
+                    
+                                    // 1. 必须用 KVC 方式赋值，绕开编译器的属性检查
+                    if let colorFilter = CIFilter(name: "CIColorControls") {
+                        colorFilter.setValue(baseCIImage, forKey: kCIInputImageKey)
+                        colorFilter.setValue(1.25, forKey: kCIInputSaturationKey)
+                        colorFilter.setValue(1.00, forKey: kCIInputContrastKey)
+                        
+                        // 2. 拿到增强后的 CIImage
+                        guard let boostedImage = colorFilter.outputImage else { return }
+                        
+                        // 3. 🚨 必须送进 renderFilteredJPEG 渲染成 JPEG Data 并缝合元数据！
+                        if let finalJPEGData = self?.renderFilteredJPEG(from: boostedImage, with: metadata, camera: camera) {
+                            self?.saveImageDataToLibrary(finalJPEGData, isRaw: false)
+                        }
+                    }
+                    
+                    
+                    
+                } else {
+                    // 非 STD 模式，直接把原始 baseCIImage 送进去渲染
+                    if let finalJPEGData = self?.renderFilteredJPEG(from: baseCIImage, with: metadata, camera: camera) {
+                        self?.saveImageDataToLibrary(finalJPEGData, isRaw: false)
+                    }
                 }
             }
             

@@ -43,7 +43,7 @@ class LensManager: ObservableObject {
             finalLenses.insert(frontLensObj, at: 0)
         }
         
-        let defaultLens = finalLenses.first { $0.device.deviceType == .builtInWideAngleCamera } ?? finalLenses.first!
+        let defaultLens = backLenses.first { $0.device.deviceType == .builtInWideAngleCamera } ?? finalLenses.first!
         
         return (finalLenses, defaultLens)
     }
