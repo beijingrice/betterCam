@@ -154,23 +154,21 @@ struct MenuView: View {
         }
     }
     
-    /*
-    private var enableColorProfileInRAWsection: some View {
+    private var zeroProcessingSection: some View {
         VStack(alignment: .leading, spacing: innerSpacing) {
-            Text("Enable color profile in RAW mode")
+            Text("Enable ZERO PROCESSING")
                 .font(.caption.bold()).foregroundColor(.gray)
             HStack(spacing: 0) {
-                SegmentedButton(title: ENABLE, isSelected: camera.enableColorProfileInRAW) {
-                    camera.enableColorProfileInRAW = true
+                SegmentedButton(title: ENABLE, isSelected: pm.isPureRawEngineEnabled) {
+                    pm.isPureRawEngineEnabled = true
                 }
-                SegmentedButton(title: DISABLE, isSelected: !camera.enableColorProfileInRAW) {
-                    camera.enableColorProfileInRAW = false
+                SegmentedButton(title: DISABLE, isSelected: !pm.isPureRawEngineEnabled) {
+                    pm.isPureRawEngineEnabled = false
                 }
             }
             .background(Color.white.opacity(0.1)).cornerRadius(roundedCornerRadius)
         }
     }
-     */
     
     private var moneyONEGAIsection: some View {
         VStack(alignment: .leading, spacing: innerSpacing) {
@@ -254,8 +252,7 @@ struct MenuView: View {
                         
                         preferAUTOsection
                         
-                        // enableColorProfileInRAWsection
-                        // TODO: Enable it
+                        zeroProcessingSection
                         
                         if !camera.doneTheTip {
                             moneyONEGAIsection // かわいいからお金お願いします〜

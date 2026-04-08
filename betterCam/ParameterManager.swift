@@ -42,6 +42,8 @@ class ParameterManager: ObservableObject {
     let enableFrontCameraKey: String = "enableFrontCamera"
     @Published var shutterSoundSelection: ShutterSoundMode = .sony
     let shutterSoundSelectionKey: String = "shutterSoundSelection"
+    @Published var isPureRawEngineEnabled: Bool = false
+    let isPureRawEngineEnabledKey: String = "isPureRawEngineEnabled"
     
     // UserDefaults, but shared with home screen widget
     let prefs = UserDefaults(suiteName: "group.com.rice.betterCam")
@@ -89,10 +91,12 @@ class ParameterManager: ObservableObject {
     func savePublishedParameters() {
         UserDefaults.standard.set(enableFrontCamera, forKey: enableFrontCameraKey)
         UserDefaults.standard.setEnum(shutterSoundSelection, forKey: shutterSoundSelectionKey)
+        UserDefaults.standard.set(isPureRawEngineEnabled, forKey: isPureRawEngineEnabledKey)
     }
     
     func loadPublishedParameters() {
         self.enableFrontCamera = UserDefaults.standard.bool(forKey: enableFrontCameraKey)
+        self.isPureRawEngineEnabled = UserDefaults.standard.bool(forKey: isPureRawEngineEnabledKey)
         self.shutterSoundSelection = UserDefaults.standard.getEnum(type: ShutterSoundMode.self, forKey: shutterSoundSelectionKey) ?? .sony
     }
         
@@ -140,7 +144,9 @@ class ParameterManager: ObservableObject {
         // 🔒 如果是内部联动引起的改变，直接拦截，防止死循环
         guard !isAutoUpdating else { return }
         isAutoUpdating = true
-        defer { isAutoUpdating = false } // 💡 defer 保证在这个函数结束时，锁一定会解开
+        defer {
+            isAutoUpdating = false
+        } // 💡 defer 保证在这个函数结束时，锁一定会解开
 
         if newSS == "AUTO" && ISO != "AUTO" {
             lastISO = ISO

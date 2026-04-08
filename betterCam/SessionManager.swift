@@ -19,6 +19,8 @@ class SessionManager: NSObject {
     
     weak var delegate: Camera?
     
+    
+    private let processingQueue = DispatchQueue(label: "com.bettercam.processingQueue", attributes: .concurrent)
     private let sessionQueue = DispatchQueue(label: "com.bettercam.sessionQueue")
     private var exposureOffsetObserver: NSKeyValueObservation?
     private var smoothedOffset: Float = 0.0
@@ -212,14 +214,25 @@ class SessionManager: NSObject {
         connection.videoOrientation = orientation
         let (imageQuality, isFront) = userSettings
         let rawFormat = photoOutput.availableRawPhotoPixelFormatTypes.first
-        let photoSettings: AVCapturePhotoSettings
-        if imageQuality == "DNG+J" && rawFormat != nil {
+        var photoSettings: AVCapturePhotoSettings
+        
+        let pureEngine = delegate?.parameterManager.isPureRawEngineEnabled ?? false
+        
+        // 💡 1. Zero Process 终极霸王条款：
+        // 只要开了 pureEngine，且不是纯 DNG 模式，一律只向硬件要 RAW！彻底切断苹果的熟肉流水线！
+        if pureEngine && imageQuality != "DNG" && rawFormat != nil {
+            photoSettings = AVCapturePhotoSettings(rawPixelFormatType: rawFormat!)
+        }
+        // 2. 以下是普通的下单逻辑
+        else if imageQuality == "DNG+J" && rawFormat != nil {
             photoSettings = AVCapturePhotoSettings(rawPixelFormatType: rawFormat!, processedFormat: [AVVideoCodecKey: AVVideoCodecType.hevc])
         } else if imageQuality == "DNG" && rawFormat != nil {
             photoSettings = AVCapturePhotoSettings(rawPixelFormatType: rawFormat!)
         } else {
             photoSettings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.hevc])
         }
+        
+        
         photoSettings.photoQualityPrioritization = .speed
         photoSettings.isShutterSoundSuppressionEnabled = true
         
@@ -285,50 +298,103 @@ extension SessionManager: AVCaptureVideoDataOutputSampleBufferDelegate { // live
     
 extension SessionManager: AVCapturePhotoCaptureDelegate { // photo stream
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
-        guard let camera = self.delegate else { return }
-        if let error = error { return }
-        defer { DispatchQueue.main.async { camera.isCapturing = false } }
+        guard let camera = self.delegate, error == nil else { return }
         
-        // --- 逻辑 A: 处理 RAW (DNG) 数据 ---
+        // 路由分发：根据照片类型，送入不同的“冲洗车间”
         if photo.isRawPhoto {
-            if let rawData = photo.fileDataRepresentation() {
-                saveImageDataToLibrary(rawData, isRaw: true)
-            }
-            if camera.parameterManager.imageQuality == "DNG" { return }
+            processRawPhoto(photo, camera: camera)
+        } else {
+            processProcessedPhoto(photo, camera: camera)
         }
+    }
+    
+    func photoOutput(_ output: AVCapturePhotoOutput, didFinishCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings, error: Error?) {
+        // 无论这次拍摄是成功、失败、单拍、双拍，只要到了这里，说明流水线彻底空了！
+        DispatchQueue.main.async {
+            self.delegate?.isSensorBusy = false
+        }
+    }
+    
+    private func processRawPhoto(_ photo: AVCapturePhoto, camera: Camera) {
+        // 这两步提取数据很快，在当前线程做
+        guard let rawData = photo.fileDataRepresentation() else { return }
+        let quality = camera.parameterManager.imageQuality
+        let pureEngine = camera.parameterManager.isPureRawEngineEnabled
+        let metadata = photo.metadata // 提前把元数据拿出来
         
-        // --- 逻辑 B: 处理 JPEG (带滤镜) 数据 ---
-        guard camera.parameterManager.imageQuality != "DNG" else { return }
-        
-        if !photo.isRawPhoto {
-            guard let imageData = photo.fileDataRepresentation(),
-                  var ciImage = CIImage(data: imageData) else { return }
-            
-            // 1. 应用滤镜处理
-            let filteredImage = FilmEngine.shared.process(ciImage, styleName: camera.parameterManager.style, lutIntensity: camera.lutIntensity, grainIntensity: camera.grainIntensity)
-            
-            // 2. 渲染为中间 CGImage
-            let context = CIContext()
-            guard let cgImage = context.createCGImage(filteredImage, from: filteredImage.extent) else { return }
-            
-            // 3. 准备手动写入元数据的 Data 对象
-            let outputData = NSMutableData()
-            guard let destination = CGImageDestinationCreateWithData(outputData as CFMutableData, UTType.jpeg.identifier as CFString, 1, nil) else { return }
-            
-            // 💡 关键点：获取并修正元数据
-            var metadata = photo.metadata
-            
-            // 确保方向被显式写入，防止 Core Image 渲染后丢失旋转信息
-            if let orientation = photo.metadata[kCGImagePropertyOrientation as String] {
-                metadata[kCGImagePropertyOrientation as String] = orientation
+        // 🚀 核心：把耗时的操作踢到并发后台队列！
+        processingQueue.async { [weak self] in
+            // 存底片
+            if quality == "DNG" || quality == "DNG+J" {
+                self?.saveImageDataToLibrary(rawData, isRaw: true)
             }
             
-            // 4. 将 CGImage 和 元数据 合并写入
-            CGImageDestinationAddImage(destination, cgImage, metadata as CFDictionary)
+            // 自己洗照片 (Zero Process)
+            if pureEngine && quality != "DNG" {
+                guard let rawFilter = CIRAWFilter(imageData: rawData, identifierHint: nil),
+                      let baseCIImage = rawFilter.outputImage else { return }
+                
+                // 这里的 render 极其耗时，但现在在后台，UI 丝毫不卡！
+                if let finalJPEGData = self?.renderFilteredJPEG(from: baseCIImage, with: metadata, camera: camera) {
+                    self?.saveImageDataToLibrary(finalJPEGData, isRaw: false)
+                }
+            }
             
-            if CGImageDestinationFinalize(destination) {
-                saveImageDataToLibrary(outputData as Data, isRaw: false)
+            // 💡 洗完收工，通知 Camera 释放一个内存缓冲位！
+            DispatchQueue.main.async {
+                camera.inFlightPhotos -= 1
             }
         }
+    }
+    
+    private func processProcessedPhoto(_ photo: AVCapturePhoto, camera: Camera) {
+        let quality = camera.parameterManager.imageQuality
+        let pureEngine = camera.parameterManager.isPureRawEngineEnabled
+        
+        if quality == "DNG" || pureEngine { return }
+        
+        // 提前拿数据
+        guard let imageData = photo.fileDataRepresentation(),
+              let ciImage = CIImage(data: imageData) else { return }
+        let metadata = photo.metadata
+        
+        // 🚀 踢到后台并发处理！
+        processingQueue.async { [weak self] in
+            if let finalJPEGData = self?.renderFilteredJPEG(from: ciImage, with: metadata, camera: camera) {
+                self?.saveImageDataToLibrary(finalJPEGData, isRaw: false)
+            }
+            
+            // 💡 释放内存位
+            DispatchQueue.main.async {
+                camera.inFlightPhotos -= 1
+            }
+        }
+    }
+    
+    private func renderFilteredJPEG(from ciImage: CIImage, with originalMetadata: [String: Any], camera: Camera) -> Data? {
+        let filteredImage = FilmEngine.shared.process(
+            ciImage,
+            styleName: camera.parameterManager.style,
+            lutIntensity: camera.lutIntensity,
+            grainIntensity: camera.grainIntensity
+        )
+        
+        guard let cgImage = self.context.createCGImage(filteredImage, from: filteredImage.extent) else { return nil }
+        
+        // C. 准备容器
+        let outputData = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(outputData as CFMutableData, UTType.jpeg.identifier as CFString, 1, nil) else { return nil }
+                
+        // D. 缝合元数据
+        var finalMetadata = originalMetadata
+        if let orientation = originalMetadata[kCGImagePropertyOrientation as String] {
+            finalMetadata[kCGImagePropertyOrientation as String] = orientation
+        }
+                
+        // E. 封口打包
+        CGImageDestinationAddImage(destination, cgImage, finalMetadata as CFDictionary)
+        guard CGImageDestinationFinalize(destination) else { return nil }
+                
+        return outputData as Data
     }
 }

@@ -201,6 +201,22 @@
         }
       }
     },
+    "Enable ZERO PROCESSING" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "加工なしモード"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "启用零处理模式"
+          }
+        }
+      }
+    },
     "Enter new name" : {
       "localizations" : {
         "ja" : {

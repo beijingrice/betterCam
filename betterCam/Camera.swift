@@ -36,7 +36,12 @@ class Camera: NSObject, ObservableObject {
         }
     }
     // Camera App Status
-    @Published var isCapturing: Bool = false
+    
+    // @Published var isCapturing: Bool = false
+    // CHANGE TO ->
+    @Published var isSensorBusy: Bool = false
+    @Published var inFlightPhotos: Int = 0
+    let maxBufferCount: Int = 3
     @Published var isShowingMenu = false { didSet { manageSession() } }
     @Published var inCameraView: Bool = true { didSet { manageSession() } }
     @AppStorage("doneTheTip") var doneTheTip: Bool = false
@@ -106,6 +111,7 @@ class Camera: NSObject, ObservableObject {
             
         // 💡 监听参数拨盘 (SS / ISO / EV) 触发更新曝光
         Publishers.CombineLatest3(parameterManager.$SS, parameterManager.$ISO, parameterManager.$EV)
+            .debounce(for: .milliseconds(50), scheduler: DispatchQueue.main)
             .sink { [weak self] _, _, _ in self?.sessionManager.updateExposure() }
             .store(in: &cancellables)
             
@@ -156,8 +162,10 @@ class Camera: NSObject, ObservableObject {
     
     // MARK: - 交互操作
     func takePhoto() {
-        guard !isCapturing && !isShowingTutorial else { return }
-        isCapturing = true
+        guard !isSensorBusy && inFlightPhotos < maxBufferCount && !isShowingTutorial else { return }
+        isSensorBusy = true
+        inFlightPhotos += 1
+        
         sessionManager.capturePhoto(orientation: motionManager.deviceOrientation, userSettings: (
             parameterManager.imageQuality,
             lensManager.currentLens.device.position == .front // check if using front cam
