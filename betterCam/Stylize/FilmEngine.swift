@@ -33,75 +33,85 @@ class FilmEngine: ObservableObject {
         // 3. 加载用户手动导入并存到沙盒里的 LUT
         loadSavedCustomLUTs()
         // Get noise generator ready
-        prepareStaticGrain()
-    }
-    
-    private func prepareStaticGrain() {
-        let noiseGenerator = CIFilter(name: "CIRandomGenerator")!
-        guard let noise = noiseGenerator.outputImage?.cropped(to: CGRect(x: 0, y: 0, width: 2000, height: 2000)) else { return }
-        
-        // 预设好黑白感、对比度以及基础亮度（EV -3.5 让它若隐若现）
-        let processedNoise = noise
-            .applyingFilter("CIColorControls", parameters: [
-                kCIInputSaturationKey: 0,
-                kCIInputContrastKey: 1.1
-            ])
-            .applyingFilter("CIExposureAdjust", parameters: [kCIInputEVKey: -2.5])
-        
-        self.staticGrainOverlay = processedNoise
     }
     
     
     private func applyDynamicGrain(to input: CIImage, intensity: Float) -> CIImage {
-        // 1. 生成原始噪点
+        // ==========================================
+        // 🚀 1. 物理源头：坚持全像素采样 (No Downsampling)
+        // 直接生成 iPhone 原生分辨率的 1:1 数学噪点 (0.0 ~ 1.0)
+        // 这能保证全网最高的画质分辨率和最细腻的细粒感。
+        // ==========================================
         guard let noise = CIFilter(name: "CIRandomGenerator")?.outputImage else { return input }
         
-        // 2. 模拟颗粒结块 (Blur - 控制尺寸)
-        // 保持原来的逻辑：强度越大，模糊半径越大，颗粒越大块
-        let blurRadius = Double(intensity * 1.5)
-        let blurredNoise = noise.applyingFilter("CIGaussianBlur", parameters: [
-            kCIInputRadiusKey: blurRadius
-        ])
-        
-        // 3. 💡 关键修改：暴力去亮 + 极端对比度
-        // 目标：把噪点层变成“白纸上的黑点”，而不是“灰纸上的灰点”
-        
-        let processedGrain = blurredNoise
+        // ==========================================
+        // 🧬 2. 轻微结块 (Slight Clumping)：驯服“脏感”
+        // 💡 针对痛点微创手术：将模糊半径压到极其微小，保持锐度。
+        // 0.4px 的模糊足以让相邻像素轻微融合产生“块状感”，但绝不会产生“脏脏的灰”。
+        // ==========================================
+        let blurRadius = Double(intensity * 0.4)
+        let processedGrain = noise
+            .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: blurRadius])
+            // 💡 关键：建立低反差、去色的中灰平衡贴图。
+            // 对比度要低（1.0 ~ 1.15），让颗粒温润发灰，绝不能非黑即白。
             .applyingFilter("CIColorControls", parameters: [
-                kCIInputSaturationKey: 0,    // 彻底去色
-                kCIInputContrastKey: 2.0 + (intensity * 3.0), // 极高对比度，让颗粒边缘像刀切一样硬
+                kCIInputSaturationKey: 0,
+                kCIInputContrastKey: 0.8 + (intensity * 0.15), // 极低的动态高反差
                 kCIInputBrightnessKey: 0.0
             ])
-            // 💡 核心魔法：使用 ColorMatrix 进行“暗部偏移”
             .applyingFilter("CIColorMatrix", parameters: [
-                // R, G, B 全部乘以 1 (保持原值)，但 Bias (偏移) 减去 0.3 ~ 0.5
-                // 这意味着：原来的中灰(0.5)会变成(0.1)甚至(0.0)的纯黑。
-                // 只有原来的极亮部(0.9+)才能勉强保留一点点灰度，其余全被压成黑色。
-                "inputBiasVector": CIVector(x: -0.3 - CGFloat(intensity * 0.2),
-                                            y: -0.3 - CGFloat(intensity * 0.2),
-                                            z: -0.3 - CGFloat(intensity * 0.2),
-                                            w: 0)
+                        "inputRVector": CIVector(x: 0.4, y: 0, z: 0, w: 0),
+                        "inputGVector": CIVector(x: 0, y: 0.4, z: 0, w: 0),
+                        "inputBVector": CIVector(x: 0, y: 0, z: 0.4, w: 0),
+                        "inputBiasVector": CIVector(x: 0.3, y: 0.3, z: 0.3, w: 0) // 💡 这一步保证了没有死黑
             ])
         
-        // 4. 调整透明度
-        // 因为现在是纯黑颗粒，不需要太高透明度就能看得很清楚
-        let alpha = 0.2 + (intensity * 0.2)
-        let finalGrain = processedGrain.applyingFilter("CIColorMatrix", parameters: [
-            "inputAVector": CIVector(x: 0, y: 0, z: 0, w: CGFloat(alpha))
-        ])
-
-        // 5. 混合模式改为 Overlay 或 HardLight
-        // 裁剪很重要，否则性能崩溃
-        let croppedGrain = finalGrain.cropped(to: input.extent)
+        let croppedGrain = processedGrain.cropped(to: input.extent)
         
-        // 💡 如果你觉得 Overlay 还是不够黑，可以试试 "CILinearBurnBlendMode" (线性加深) 或 Stay with Overlay
-        // Overlay 在处理深色层时，会显著压暗背景，非常适合模拟银盐阻光效果。
-        let combined = CIFilter(name: "CIMultiplyBlendMode", parameters: [
-            kCIInputImageKey: croppedGrain,
-            kCIInputBackgroundImageKey: input
-        ])?.outputImage
-
-        return combined ?? input
+        // ==========================================
+        // 🧪 3. 最高优先级实现：染色混合 (Correct Blend)
+        // 💡 终极解决“染色感”方案：将 Blend Mode 改为 Soft Light (柔光)！
+        // 柔光是胶片模拟的黄金法则：暗颗粒会变成原色（如深蓝），亮颗粒变成原色（如浅蓝）。
+        // 它通透、不脏、且 100% 保证色彩和周边融合。
+        // ==========================================
+        let softLightFilter = CIFilter(name: "CISoftLightBlendMode")
+        softLightFilter?.setValue(croppedGrain, forKey: kCIInputImageKey)
+        softLightFilter?.setValue(input, forKey: kCIInputBackgroundImageKey)
+        
+        guard let combined = softLightFilter?.outputImage else { return input }
+        
+        // ==========================================
+        // 🌗 4. 空间分布 (Everywhere with Gentle Falloff)
+        // 💡 针对痛点微创手术：建立“温和的中间调遮罩”，绝对不能切断黑白！
+        // ==========================================
+        let gray = input.applyingFilter("CIColorControls", parameters: [kCIInputSaturationKey: 0])
+        
+        // 构造一个“温柔”的遮罩。逻辑：中灰区 100% 颗粒，死黑/死白区仍保留约 30% 到 50% 颗粒。
+        // 这里的 Bias 和系数是精挑细选的，让遮罩层永远不会变成纯黑。
+        guard let gentleMask = CIFilter(name: "CIColorMatrix", parameters: [
+            kCIInputImageKey: gray,
+            "inputRVector": CIVector(x: -1.2, y: 0, z: 0, w: 0), // 温和压制高光
+            "inputBiasVector": CIVector(x: 1.1, y: 1.1, z: 1.1, w: 0) // 💡 极高基准亮度，保护黑场绝不掉色
+        ])?.outputImage else { return combined }
+        
+        // ==========================================
+        // 🎁 5. 终极合成：极低的不透明度
+        // 理光 GR 负片的魅力在于“若有若无”，所以基础不透明度要极低。
+        // ==========================================
+        let finalOpacity = 0.12 + (intensity * 0.3) // 整体基础压得很低
+        
+        // 先把遮罩的基准透明度提起来 (加亮 Bias)
+        let attenuatedMask = gentleMask.applyingFilter("CIColorControls", parameters: [
+            kCIInputBrightnessKey: CGFloat(finalOpacity - 0.5)
+        ])
+        
+        // 物理级合成
+        let blendFilter = CIFilter(name: "CIBlendWithMask")
+        blendFilter?.setValue(combined, forKey: kCIInputImageKey)           // 有温和噪点的染色图
+        blendFilter?.setValue(input, forKey: kCIInputBackgroundImageKey)    // 干净原图
+        blendFilter?.setValue(attenuatedMask, forKey: kCIInputMaskImageKey) // 温和遮罩
+        
+        return blendFilter?.outputImage ?? combined
     }
     
     
