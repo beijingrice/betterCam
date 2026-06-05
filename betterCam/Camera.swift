@@ -22,17 +22,8 @@ class Camera: NSObject, ObservableObject {
     @Published var isAdjustingValue: Bool = false
     @Published var exposureIndicatorMode: ExposureMode = .off {
         didSet {
+            MetalWHProcessor.shared.resetIndicatorState()
             MetalWHProcessor.shared.exposureIndicatorMode = self.exposureIndicatorMode
-            DispatchQueue.main.async {
-                if self.exposureIndicatorMode == .waveform {
-                    MetalWHProcessor.shared.histogramImage = nil
-                } else if self.exposureIndicatorMode == .histogram {
-                    MetalWHProcessor.shared.waveformImage = nil
-                } else {
-                    MetalWHProcessor.shared.waveformImage = nil
-                    MetalWHProcessor.shared.histogramImage = nil
-                }
-            }
         }
     }
     // Camera App Status
@@ -91,6 +82,11 @@ class Camera: NSObject, ObservableObject {
             .sink { [weak self] newLens in
                 guard let self = self else { return }
                 
+                if self.sessionManager.isUsingDevice(newLens.device) {
+                    self.updateUIWithLens(newLens)
+                    return
+                }
+                
                 // 1. 瞬间开启模糊过场
                 withAnimation(.easeInOut(duration: 0.3)) {
                     self.isSwitchingLens = true
@@ -109,10 +105,23 @@ class Camera: NSObject, ObservableObject {
             }
             .store(in: &cancellables)
             
-        // 💡 监听参数拨盘 (SS / ISO / EV) 触发更新曝光
-        Publishers.CombineLatest3(parameterManager.$SS, parameterManager.$ISO, parameterManager.$EV)
+        // 💡 监听参数拨盘 (SS / ISO) 触发更新曝光
+        Publishers.CombineLatest(parameterManager.$SS, parameterManager.$ISO)
             .debounce(for: .milliseconds(50), scheduler: DispatchQueue.main)
-            .sink { [weak self] _, _, _ in self?.sessionManager.updateExposure() }
+            .sink { [weak self] _, _ in self?.sessionManager.updateExposure() }
+            .store(in: &cancellables)
+        
+        // 💡 手动模式下 EV 是测光显示，不反向触发硬件曝光更新
+        parameterManager.$EV
+            .dropFirst()
+            .removeDuplicates()
+            .debounce(for: .milliseconds(120), scheduler: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self = self else { return }
+                if self.parameterManager.SS == ExposureParameter.auto || self.parameterManager.ISO == ExposureParameter.auto {
+                    self.sessionManager.updateExposure()
+                }
+            }
             .store(in: &cancellables)
             
         // 💡 监听其他设置
@@ -139,6 +148,13 @@ class Camera: NSObject, ObservableObject {
     }
     
     func refreshLensCapabilities() {
+        if !Thread.isMainThread {
+            DispatchQueue.main.async { [weak self] in
+                self?.refreshLensCapabilities()
+            }
+            return
+        }
+        
         // 1. 让当前镜头自我刷新（去读 6400 的极限）
         lensManager.currentLens.refreshCapabilities()
         
@@ -158,6 +174,7 @@ class Camera: NSObject, ObservableObject {
         parameterManager.actualISOoptions = lens.availableISOoptions
         parameterManager.Aperture = lens.aperture
         parameterManager.currentFocalLength = lens.equivalentFocalLength
+        parameterManager.validateExposureOptions()
     }
     
     // MARK: - 交互操作

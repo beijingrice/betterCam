@@ -86,30 +86,103 @@ func nextOption(in options: [String], current: String, direction: Int, isEV: Boo
     return options[nextIndex]
 }
 
+enum ExposureParameter {
+    static let auto = "AUTO"
+    private static let preferredTimescale: CMTimeScale = 1_000_000_000
+    
+    static func isoValue(_ string: String) -> Float? {
+        return Float(normalizedISO(string))
+    }
+    
+    static func normalizedISO(_ string: String) -> String {
+        if string.hasPrefix("ISO ") {
+            return String(string.dropFirst(4))
+        }
+        return string
+    }
+    
+    static func clampedISO(_ iso: Float, for lens: Lens) -> Float {
+        return min(max(iso, lens.minISO), lens.maxISO)
+    }
+    
+    static func shutterSeconds(_ string: String) -> Double? {
+        if let doubleValue = Double(string), doubleValue > 0 {
+            return doubleValue
+        }
+        
+        let components = string.components(separatedBy: "/")
+        if components.count == 2,
+           let numerator = Double(components[0]),
+           let denominator = Double(components[1]),
+           numerator > 0,
+           denominator > 0 {
+            return numerator / denominator
+        }
+        
+        return nil
+    }
+    
+    static func shutterDuration(_ string: String) -> CMTime? {
+        guard let seconds = shutterSeconds(string) else { return nil }
+        return CMTime(seconds: seconds, preferredTimescale: preferredTimescale)
+    }
+    
+    static func clampedDuration(_ duration: CMTime, for lens: Lens) -> CMTime {
+        if CMTimeCompare(duration, lens.minExposureDuration) < 0 {
+            return lens.minExposureDuration
+        }
+        if CMTimeCompare(duration, lens.maxExposureDuration) > 0 {
+            return lens.maxExposureDuration
+        }
+        return duration
+    }
+    
+    static func validatedSS(_ ss: String, options: [String]) -> String {
+        return nearestOption(in: options, current: ss, value: shutterSeconds)
+    }
+    
+    static func validatedISO(_ iso: String, options: [String]) -> String {
+        let normalized = normalizedISO(iso)
+        return nearestOption(in: options, current: normalized) {
+            guard let value = isoValue($0) else { return nil }
+            return Double(value)
+        }
+    }
+    
+    private static func nearestOption(in options: [String], current: String, value: (String) -> Double?) -> String {
+        guard !options.isEmpty else { return current }
+        if options.contains(current) { return current }
+        if current == auto { return options.contains(auto) ? auto : (options.first ?? current) }
+        
+        let manualOptions = options.filter { $0 != auto }
+        guard let currentValue = value(current) else { return manualOptions.first ?? options.first ?? current }
+        
+        return manualOptions.min {
+            guard let left = value($0), let right = value($1) else { return false }
+            return abs(left - currentValue) < abs(right - currentValue)
+        } ?? manualOptions.first ?? options.first ?? current
+    }
+}
+
 extension Array where Element == String {
     func supportedISO(for device: AVCaptureDevice) -> [String] {
         let maxISO = device.activeFormat.maxISO
         let minISO = device.activeFormat.minISO
         
         return self.filter {
-            if $0 == "AUTO" { return true }
-            guard let val = Float($0) else { return false }
+            if $0 == ExposureParameter.auto { return true }
+            guard let val = ExposureParameter.isoValue($0) else { return false }
             return val >= minISO && val <= maxISO
         }
     }
     
     func supportedSS(for device: AVCaptureDevice) -> [String] {
-        let minSeconds = CMTimeGetSeconds(device.activeFormat.minExposureDuration)
-        let maxSeconds = CMTimeGetSeconds(device.activeFormat.maxExposureDuration)
-        
         return self.filter {
-            if $0 == "AUTO" { return true }
-            
-            // 💡 修复点：调用一个自定义转换函数，支持处理 "/" 符号
-            guard let val = parseShutterSpeedToDouble($0) else { return false }
-            
-            // 浮点数比较建议加一个极小的余量（epsilon），防止精度误差
-            return val >= (minSeconds - 0.00001) && val <= (maxSeconds + 0.00001)
+            if $0 == ExposureParameter.auto { return true }
+            guard let duration = ExposureParameter.shutterDuration($0) else { return false }
+            let minDuration = device.activeFormat.minExposureDuration
+            let maxDuration = device.activeFormat.maxExposureDuration
+            return CMTimeCompare(duration, minDuration) >= 0 && CMTimeCompare(duration, maxDuration) <= 0
         }
     }
     
@@ -117,23 +190,5 @@ extension Array where Element == String {
         return self.map {
             isoItem in Int(isoItem) != nil ? "ISO \(isoItem)" : isoItem
         }
-    }
-
-    // 辅助函数：把 "1/100" 转为 0.01
-    private func parseShutterSpeedToDouble(_ string: String) -> Double? {
-        if let doubleValue = Double(string) {
-            return doubleValue // 处理 "1", "0.8" 等直接数值
-        }
-        
-        // 处理 "1/100" 这种分数格式
-        let components = string.components(separatedBy: "/")
-        if components.count == 2,
-           let numerator = Double(components[0]),
-           let denominator = Double(components[1]),
-           denominator != 0 {
-            return numerator / denominator
-        }
-        
-        return nil
     }
 }

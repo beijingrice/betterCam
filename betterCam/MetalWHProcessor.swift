@@ -28,6 +28,13 @@ class MetalWHProcessor: ObservableObject {
     private var waveformPipeline: MTLComputePipelineState?
     private var histogramPipeline: MTLComputePipelineState?
     private var histogramBuffer: MTLBuffer?
+    private let renderQueue = DispatchQueue(label: "com.bettercam.whRenderQueue")
+    private let indicatorFrameInterval: TimeInterval = 0.12
+    private let histogramSmoothing: Float = 0.72
+    private var lastIndicatorFrameTimestamp: TimeInterval = 0
+    private var isWaveformProcessing = false
+    private var isHistogramProcessing = false
+    private var smoothedHistogram = [Float](repeating: 0, count: 256)
     
     @Published var waveformImage: CGImage?
     @Published var histogramImage: CGImage?
@@ -58,7 +65,15 @@ class MetalWHProcessor: ObservableObject {
     }
     
     func process(pixelBuffer: CVPixelBuffer) {
-        guard self.exposureIndicatorMode != .off else { return }
+        if self.exposureIndicatorMode == .off {
+            if waveformImage != nil || histogramImage != nil {
+                DispatchQueue.main.async {
+                    self.resetIndicatorState()
+                }
+            }
+            return
+        }
+        guard shouldProcessIndicatorFrame() else { return }
         
         if self.exposureIndicatorMode == .waveform {
             self.processWaveform(from: pixelBuffer)
@@ -76,18 +91,27 @@ class MetalWHProcessor: ObservableObject {
                     self.waveformImage = nil
                 }
             }
-        } else if self.exposureIndicatorMode == .off {
-            // clean up VRAM
-            if waveformImage != nil || histogramImage != nil {
-                DispatchQueue.main.async {
-                    self.waveformImage = nil
-                    self.histogramImage = nil
-                }
-            }
         }
     }
     
+    private func shouldProcessIndicatorFrame() -> Bool {
+        let now = Date().timeIntervalSince1970
+        guard now - lastIndicatorFrameTimestamp >= indicatorFrameInterval else { return false }
+        lastIndicatorFrameTimestamp = now
+        return true
+    }
+    
+    func resetIndicatorState() {
+        isWaveformProcessing = false
+        isHistogramProcessing = false
+        lastIndicatorFrameTimestamp = 0
+        smoothedHistogram = [Float](repeating: 0, count: 256)
+        waveformImage = nil
+        histogramImage = nil
+    }
+    
     func processWaveform(from pixelBuffer: CVPixelBuffer) {
+        guard !isWaveformProcessing else { return }
         guard exposureIndicatorMode == .waveform,
               let pipeline = waveformPipeline,
               let queue = commandQueue,
@@ -98,7 +122,8 @@ class MetalWHProcessor: ObservableObject {
         var cvTexture: CVMetalTexture?
         
         CVMetalTextureCacheCreateTextureFromImage(kCFAllocatorDefault, cache, pixelBuffer, nil, .bgra8Unorm, width, height, 0, &cvTexture)
-        guard let inputTexture = CVMetalTextureGetTexture(cvTexture!) else { return }
+        guard let cvTexture = cvTexture,
+              let inputTexture = CVMetalTextureGetTexture(cvTexture) else { return }
         
         // 输出纹理强制设为 128x64
         let desc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm, width: overlayWidth, height: overlayHeight, mipmapped: false)
@@ -107,6 +132,7 @@ class MetalWHProcessor: ObservableObject {
         
         guard let commandBuffer = queue.makeCommandBuffer(),
               let encoder = commandBuffer.makeComputeCommandEncoder() else { return }
+        isWaveformProcessing = true
         
         encoder.setComputePipelineState(pipeline)
         encoder.setTexture(inputTexture, index: 0)
@@ -124,7 +150,10 @@ class MetalWHProcessor: ObservableObject {
             guard let self = self else { return }
             let cgImage = self.makeCGImage(from: outputTexture)
             DispatchQueue.main.async {
-                self.waveformImage = cgImage // storage target view
+                self.isWaveformProcessing = false
+                if self.exposureIndicatorMode == .waveform {
+                    self.waveformImage = cgImage // storage target view
+                }
             }
         }
         commandBuffer.commit()
@@ -132,25 +161,26 @@ class MetalWHProcessor: ObservableObject {
 
     // MARK: - Histogram Process
     func processHistogram(from pixelBuffer: CVPixelBuffer) {
+        guard !isHistogramProcessing else { return }
         guard exposureIndicatorMode == .histogram,
               let pipeline = histogramPipeline,
               let queue = commandQueue,
               let cache = textureCache,
-              let hBuffer = histogramBuffer else {
-            print("🚨 嫌疑人1：管道拦截！看看是谁 nil? Pipeline: \(histogramPipeline != nil), Buffer: \(histogramBuffer != nil)")
-            return }
+              let hBuffer = histogramBuffer else { return }
 
         let width = CVPixelBufferGetWidth(pixelBuffer)
         let height = CVPixelBufferGetHeight(pixelBuffer)
         var cvTexture: CVMetalTexture?
         CVMetalTextureCacheCreateTextureFromImage(kCFAllocatorDefault, cache, pixelBuffer, nil, .bgra8Unorm, width, height, 0, &cvTexture)
-        guard let inputTexture = CVMetalTextureGetTexture(cvTexture!) else { return }
+        guard let cvTexture = cvTexture,
+              let inputTexture = CVMetalTextureGetTexture(cvTexture) else { return }
 
         // 重置统计数据
         memset(hBuffer.contents(), 0, hBuffer.length)
 
         guard let commandBuffer = queue.makeCommandBuffer(),
               let encoder = commandBuffer.makeComputeCommandEncoder() else { return }
+        isHistogramProcessing = true
 
         encoder.setComputePipelineState(pipeline)
         encoder.setTexture(inputTexture, index: 0)
@@ -166,21 +196,29 @@ class MetalWHProcessor: ObservableObject {
         encoder.dispatchThreadgroups(gridSize, threadsPerThreadgroup: threadsPerGroup)
         encoder.endEncoding()
         
+        commandBuffer.addCompletedHandler { [weak self] _ in
+            guard let self = self else { return }
+            let ptr = hBuffer.contents().bindMemory(to: UInt32.self, capacity: 256)
+            let counts = (0..<256).map { ptr[$0] }
+            self.renderQueue.async {
+                let cgImage = self.renderHistogramUI(counts: counts)
+                DispatchQueue.main.async {
+                    self.isHistogramProcessing = false
+                    if self.exposureIndicatorMode == .histogram {
+                        self.histogramImage = cgImage
+                    }
+                }
+            }
+        }
         commandBuffer.commit()
-        
-        commandBuffer.waitUntilCompleted()
-        self.renderHistogramUI()
-        
     }
 
-    private func renderHistogramUI() {
-        guard let buffer = histogramBuffer else {
-            print("🚨 嫌疑人3：Buffer 为空，直接退出了！")
-            return }
-        let ptr = buffer.contents().bindMemory(to: UInt32.self, capacity: 256)
-        
+    private func renderHistogramUI(counts: [UInt32]) -> CGImage? {
         var maxCount: Float = 1.0
-        for i in 0..<256 { maxCount = max(maxCount, Float(ptr[i])) }
+        for i in 0..<min(counts.count, 256) {
+            smoothedHistogram[i] = smoothedHistogram[i] * histogramSmoothing + Float(counts[i]) * (1.0 - histogramSmoothing)
+            maxCount = max(maxCount, sqrt(smoothedHistogram[i]))
+        }
 
         // 适配 128x64 规格
         let size = CGSize(width: CGFloat(overlayWidth), height: CGFloat(overlayHeight))
@@ -196,18 +234,14 @@ class MetalWHProcessor: ObservableObject {
             for x in 0..<overlayWidth {
                 let binIndex = x * binsPerPixel
                 // 取两个相邻 bin 的平均值保证曲线平滑
-                let count = Float(ptr[binIndex] + ptr[binIndex + 1]) / 2.0
-                let barHeight = CGFloat(count / maxCount) * size.height
+                let count = (smoothedHistogram[binIndex] + smoothedHistogram[binIndex + 1]) / 2.0
+                let barHeight = CGFloat(sqrt(count) / maxCount) * size.height
                 
                 ctx.fill(CGRect(x: CGFloat(x), y: size.height - barHeight, width: 1.0, height: barHeight))
             }
         }
         
-        print("🚨 嫌疑人2：生成的 CGImage 是不是 nil？ \(image.cgImage == nil)") // 看看是不是这里变成了 nil
-
-        DispatchQueue.main.async {
-            self.histogramImage = image.cgImage
-        }
+        return image.cgImage
     }
     
     func makeCGImage(from texture: MTLTexture) -> CGImage? {

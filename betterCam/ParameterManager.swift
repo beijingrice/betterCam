@@ -52,7 +52,7 @@ class ParameterManager: ObservableObject {
     
     // 💡 新增：记录上一次的手动值，以及防死循环的“互斥锁”
     private var lastSS: String = "1/200"
-    private var lastISO: String = "ISO 100"
+    private var lastISO: String = "100"
     private var isAutoUpdating: Bool = false
         
     init() {
@@ -81,10 +81,11 @@ class ParameterManager: ObservableObject {
     // 💡 3. 参数持久化逻辑
     func saveExposureParameters() {
         guard enablePermanentStorage else { return }
+        let storedISO = ExposureParameter.normalizedISO(ISO)
         UserDefaults.standard.set(SS, forKey: "SS")
-        UserDefaults.standard.set(ISO, forKey: "ISO")
+        UserDefaults.standard.set(storedISO, forKey: "ISO")
         prefs?.set(SS, forKey: "last_SS")
-        prefs?.set(ISO, forKey: "last_ISO")
+        prefs?.set(storedISO, forKey: "last_ISO")
         WidgetCenter.shared.reloadAllTimelines()
     }
     
@@ -102,8 +103,8 @@ class ParameterManager: ObservableObject {
         
     func loadExposureParameters() {
         if perferAUTO {
-            self.SS = "AUTO"
-            self.ISO = "AUTO"
+            self.SS = ExposureParameter.auto
+            self.ISO = ExposureParameter.auto
             prefs?.set(SS, forKey: "last_SS")
             prefs?.set(ISO, forKey: "last_ISO")
             WidgetCenter.shared.reloadAllTimelines()
@@ -111,12 +112,38 @@ class ParameterManager: ObservableObject {
         }
         if enablePermanentStorage {
             self.SS = UserDefaults.standard.string(forKey: "SS") ?? "1/200"
-            self.ISO = UserDefaults.standard.string(forKey: "ISO") ?? "ISO 100"
+            self.ISO = ExposureParameter.normalizedISO(UserDefaults.standard.string(forKey: "ISO") ?? "100")
             
             // 💡 恢复参数时，顺便更新 last 记录，防止一拨轮子就乱跳
-            if self.SS != "AUTO" { self.lastSS = self.SS }
-            if self.ISO != "AUTO" { self.lastISO = self.ISO }
+            if self.SS != ExposureParameter.auto { self.lastSS = self.SS }
+            if self.ISO != ExposureParameter.auto { self.lastISO = self.ISO }
         }
+    }
+    
+    func validateExposureOptions() {
+        guard !actualSSoptions.isEmpty || !actualISOoptions.isEmpty else { return }
+        
+        isAutoUpdating = true
+        defer { isAutoUpdating = false }
+        
+        if SS == ExposureParameter.auto || ISO == ExposureParameter.auto {
+            SS = ExposureParameter.auto
+            ISO = ExposureParameter.auto
+            EV = "0.0"
+            return
+        }
+        
+        if !actualSSoptions.isEmpty {
+            SS = ExposureParameter.validatedSS(SS, options: actualSSoptions)
+        }
+        if !actualISOoptions.isEmpty {
+            ISO = ExposureParameter.validatedISO(ISO, options: actualISOoptions)
+        } else {
+            ISO = ExposureParameter.normalizedISO(ISO)
+        }
+        
+        if SS != ExposureParameter.auto { lastSS = SS }
+        if ISO != ExposureParameter.auto { lastISO = ISO }
     }
     
     private func setupAutoSync() {
@@ -148,12 +175,12 @@ class ParameterManager: ObservableObject {
             isAutoUpdating = false
         } // 💡 defer 保证在这个函数结束时，锁一定会解开
 
-        if newSS == "AUTO" && ISO != "AUTO" {
+        if newSS == ExposureParameter.auto && ISO != ExposureParameter.auto {
             lastISO = ISO
-            ISO = "AUTO"
+            ISO = ExposureParameter.auto
             EV = "0.0"
-        } else if newSS != "AUTO" && ISO == "AUTO" {
-            ISO = lastISO
+        } else if newSS != ExposureParameter.auto && ISO == ExposureParameter.auto {
+            ISO = actualISOoptions.isEmpty ? lastISO : ExposureParameter.validatedISO(lastISO, options: actualISOoptions)
         }
     }
     
@@ -163,12 +190,12 @@ class ParameterManager: ObservableObject {
         isAutoUpdating = true
         defer { isAutoUpdating = false }
 
-        if newISO == "AUTO" && SS != "AUTO" {
+        if newISO == ExposureParameter.auto && SS != ExposureParameter.auto {
             lastSS = SS
-            SS = "AUTO"
+            SS = ExposureParameter.auto
             EV = "0.0"
-        } else if newISO != "AUTO" && SS == "AUTO" {
-            SS = lastSS
+        } else if newISO != ExposureParameter.auto && SS == ExposureParameter.auto {
+            SS = actualSSoptions.isEmpty ? lastSS : ExposureParameter.validatedSS(lastSS, options: actualSSoptions)
         }
     }
 }

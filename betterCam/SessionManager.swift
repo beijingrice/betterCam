@@ -25,7 +25,13 @@ class SessionManager: NSObject {
     private var exposureOffsetObserver: NSKeyValueObservation?
     private var smoothedOffset: Float = 0.0
     private var lastUpdateTimestamp: TimeInterval = 0
+    private var lastMeterDisplayValue: Float?
+    private let meterUpdateInterval: TimeInterval = 0.25
+    private let meterSmoothing: Float = 0.90
+    private let meterZeroDeadband: Float = 0.12
+    private let meterDisplayDeadband: Float = 0.1
     private var physicalStreamingPosition: AVCaptureDevice.Position = .back
+    private var activeDeviceUniqueID: String?
     
     func initSession(with lens: Lens) {
         sessionQueue.async { [weak self] in
@@ -50,6 +56,7 @@ class SessionManager: NSObject {
             
             self.session.commitConfiguration()
             self.physicalStreamingPosition = lens.device.position
+            self.activeDeviceUniqueID = lens.device.uniqueID
             self.delegate?.refreshLensCapabilities() 
             self.session.startRunning()
             self.setupLightMeter(for: lens.device)
@@ -75,7 +82,14 @@ class SessionManager: NSObject {
             }
             self.session.commitConfiguration()
             self.physicalStreamingPosition = device.position
+            self.activeDeviceUniqueID = device.uniqueID
+            self.delegate?.refreshLensCapabilities()
+            self.setupLightMeter(for: device)
         }
+    }
+    
+    func isUsingDevice(_ device: AVCaptureDevice) -> Bool {
+        return activeDeviceUniqueID == device.uniqueID
     }
     
     func start() {
@@ -96,22 +110,20 @@ class SessionManager: NSObject {
         let currentSS = camera.parameterManager.SS
         let currentISO = camera.parameterManager.ISO
         let currentEV = camera.parameterManager.EV
-        let device = camera.lensManager.currentLens.device
+        let lens = camera.lensManager.currentLens
+        let device = lens.device
         
         sessionQueue.async { [weak self] in
             do {
                 try device.lockForConfiguration()
-                let isManual = (currentSS != "AUTO" && currentISO != "AUTO")
+                let isManual = (currentSS != ExposureParameter.auto && currentISO != ExposureParameter.auto)
                 
                 if isManual {
-                    let duration = self?.parseShutterSpeed(currentSS) ?? AVCaptureDevice.currentExposureDuration
-                    var isoValue = Float(currentISO) ?? 100.0
-                    if isoValue > camera.lensManager.currentLens.maxISO {
-                        isoValue = camera.lensManager.currentLens.maxISO
-                    } else if isoValue < camera.lensManager.currentLens.minISO {
-                        isoValue = camera.lensManager.currentLens.minISO
-                    }
-                    device.setExposureModeCustom(duration: duration, iso: isoValue, completionHandler: nil)
+                    let duration = ExposureParameter.shutterDuration(currentSS) ?? device.exposureDuration
+                    let clampedDuration = ExposureParameter.clampedDuration(duration, for: lens)
+                    let rawISO = ExposureParameter.isoValue(currentISO) ?? lens.minISO
+                    let isoValue = ExposureParameter.clampedISO(rawISO, for: lens)
+                    device.setExposureModeCustom(duration: clampedDuration, iso: isoValue, completionHandler: nil)
                 } else {
                     if let evValue = Float(currentEV) {
                         device.setExposureTargetBias(evValue, completionHandler: nil)
@@ -125,21 +137,35 @@ class SessionManager: NSObject {
     
     private func setupLightMeter(for device: AVCaptureDevice) {
         exposureOffsetObserver?.invalidate()
+        smoothedOffset = 0.0
+        lastMeterDisplayValue = nil
+        lastUpdateTimestamp = 0
+        
         exposureOffsetObserver = device.observe(\.exposureTargetOffset, options: [.new]) { [weak self] device, _ in
             guard let self = self, let camera = self.delegate else { return }
-            if camera.parameterManager.SS != "AUTO" && camera.parameterManager.ISO != "AUTO" {
+            if camera.parameterManager.SS != ExposureParameter.auto && camera.parameterManager.ISO != ExposureParameter.auto {
                 let rawOffset = device.exposureTargetOffset
-                self.smoothedOffset = (self.smoothedOffset * 0.8) + (rawOffset * 0.2)
+                self.smoothedOffset = (self.smoothedOffset * self.meterSmoothing) + (rawOffset * (1.0 - self.meterSmoothing))
+                
                 let now = Date().timeIntervalSince1970
-                if now - self.lastUpdateTimestamp > 0.15 {
-                    var displayValue = self.smoothedOffset
-                    if abs(displayValue) < 0.15 { displayValue = 0.0 }
-                    let formattedOffset = String(format: "%+.1f", displayValue)
-                    DispatchQueue.main.async {
-                        if camera.parameterManager.EV != formattedOffset {
-                            camera.parameterManager.EV = formattedOffset
-                            self.lastUpdateTimestamp = now
-                        }
+                guard now - self.lastUpdateTimestamp > self.meterUpdateInterval else { return }
+                
+                var displayValue = self.smoothedOffset
+                if abs(displayValue) < self.meterZeroDeadband { displayValue = 0.0 }
+                displayValue = (displayValue * 10).rounded() / 10
+                
+                if let lastValue = self.lastMeterDisplayValue,
+                   abs(displayValue - lastValue) < self.meterDisplayDeadband {
+                    return
+                }
+                
+                self.lastUpdateTimestamp = now
+                self.lastMeterDisplayValue = displayValue
+                let formattedOffset = String(format: "%+.1f", displayValue)
+                
+                DispatchQueue.main.async {
+                    if camera.parameterManager.EV != formattedOffset {
+                        camera.parameterManager.EV = formattedOffset
                     }
                 }
             }
@@ -243,19 +269,6 @@ class SessionManager: NSObject {
         photoOutput.capturePhoto(with: photoSettings, delegate: self)
     }
     
-    private func parseShutterSpeed(_ ss: String) -> CMTime {
-        if let doubleVal = Double(ss) {
-            return CMTime(value: 1000, timescale: Int32(1000 / doubleVal))
-        }
-        
-        let components = ss.components(separatedBy: "/")
-        if components.count == 2,
-           let num = Double(components[0]),
-           let den = Double(components[1]) {
-            return CMTime(value: Int64(num * 1000), timescale: Int32(den * 1000))
-        }
-        return AVCaptureDevice.currentExposureDuration
-    }
 }
 
 
