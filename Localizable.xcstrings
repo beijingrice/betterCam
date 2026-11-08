@@ -21,6 +21,9 @@
         }
       }
     },
+    "24MP and 48MP apply to processed photos. RAW formats use a sensor-supported RAW resolution. Apple ProRAW is automatically disabled on unsupported devices." : {
+
+    },
     "BetterCam" : {
 
     },
@@ -88,6 +91,9 @@
         }
       }
     },
+    "Camera unavailable" : {
+
+    },
     "Cancel" : {
       "localizations" : {
         "ja" : {
@@ -121,6 +127,7 @@
       }
     },
     "Change it to MANAGE then click the" : {
+      "extractionState" : "stale",
       "localizations" : {
         "ja" : {
           "stringUnit" : {
@@ -300,6 +307,9 @@
         }
       }
     },
+    "Image Quality" : {
+
+    },
     "Import New LUT (.cube)" : {
       "localizations" : {
         "ja" : {
@@ -349,6 +359,7 @@
       }
     },
     "In LUT management view," : {
+      "extractionState" : "stale",
       "localizations" : {
         "ja" : {
           "stringUnit" : {
@@ -360,6 +371,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在LUT管理界面中，"
+          }
+        }
+      }
+    },
+    "In STYLE, select MANAGE and press the center of the dial to open your LUTs." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "STYLE で MANAGE を選び、ダイヤル中央を押すと LUT 管理が開きます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 STYLE 中选择 MANAGE，按下拨盘中央即可管理 LUT。"
           }
         }
       }
@@ -381,6 +408,7 @@
       }
     },
     "Look for STYLE parameter," : {
+      "extractionState" : "stale",
       "localizations" : {
         "ja" : {
           "stringUnit" : {
@@ -413,6 +441,7 @@
       }
     },
     "middle button of the dial to manage LUTs." : {
+      "extractionState" : "stale",
       "localizations" : {
         "ja" : {
           "stringUnit" : {
@@ -491,6 +520,9 @@
           }
         }
       }
+    },
+    "Photo Resolution" : {
+
     },
     "Physical Control:" : {
       "localizations" : {
@@ -815,6 +847,7 @@
       }
     },
     "Usually it's STD when launched." : {
+      "extractionState" : "stale",
       "localizations" : {
         "ja" : {
           "stringUnit" : {

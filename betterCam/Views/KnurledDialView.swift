@@ -8,8 +8,12 @@ struct KnurledDialView: View {
     @State private var lastGestureAngle: Double = 0
     @State private var hapticAccumulator: Double = 0
     
-    private let dialSize: CGFloat = 140
+    private let dialSize: CGFloat
     private let midButtonSize: CGFloat = 55
+
+    init(dialSize: CGFloat = 140) {
+        self.dialSize = dialSize
+    }
     
     private var dynamicStepDegrees: Double {
         if camera.activeIndex == UIWidgets.lensSwitch.rawValue {

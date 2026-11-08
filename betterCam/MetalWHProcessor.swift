@@ -15,7 +15,7 @@ class MetalWHProcessor: ObservableObject {
     let overlayHeight: Int = 64
     
     // Enabled Exposure Indicator
-    @Published var exposureIndicatorMode: ExposureMode = .off
+    @Published private(set) var exposureIndicatorMode: ExposureMode = .off
     
     static let shared = MetalWHProcessor()
     
@@ -32,8 +32,10 @@ class MetalWHProcessor: ObservableObject {
     private let indicatorFrameInterval: TimeInterval = 0.12
     private let histogramSmoothing: Float = 0.72
     private var lastIndicatorFrameTimestamp: TimeInterval = 0
-    private var isWaveformProcessing = false
-    private var isHistogramProcessing = false
+    private let frameSlot = DispatchSemaphore(value: 1)
+    private var renderMode: ExposureMode = .off
+    private var renderGeneration = 0
+    private var displayGeneration = 0
     private var smoothedHistogram = [Float](repeating: 0, count: 256)
     
     @Published var waveformImage: CGImage?
@@ -64,75 +66,64 @@ class MetalWHProcessor: ObservableObject {
         histogramBuffer = device.makeBuffer(length: 256 * MemoryLayout<UInt32>.stride, options: .storageModeShared)
     }
     
-    func process(pixelBuffer: CVPixelBuffer) {
-        if self.exposureIndicatorMode == .off {
-            if waveformImage != nil || histogramImage != nil {
-                DispatchQueue.main.async {
-                    self.resetIndicatorState()
-                }
-            }
-            return
-        }
-        guard shouldProcessIndicatorFrame() else { return }
-        
-        if self.exposureIndicatorMode == .waveform {
-            self.processWaveform(from: pixelBuffer)
-            // clean up VRAM
-            if histogramImage != nil {
-                DispatchQueue.main.async {
-                    self.histogramImage = nil
-                }
-            }
-        } else if self.exposureIndicatorMode == .histogram {
-            self.processHistogram(from: pixelBuffer)
-            // clean up VRAM
-            if waveformImage != nil {
-                DispatchQueue.main.async {
-                    self.waveformImage = nil
-                }
-            }
-        }
-    }
-    
-    private func shouldProcessIndicatorFrame() -> Bool {
-        let now = Date().timeIntervalSince1970
-        guard now - lastIndicatorFrameTimestamp >= indicatorFrameInterval else { return false }
-        lastIndicatorFrameTimestamp = now
-        return true
-    }
-    
-    func resetIndicatorState() {
-        isWaveformProcessing = false
-        isHistogramProcessing = false
-        lastIndicatorFrameTimestamp = 0
-        smoothedHistogram = [Float](repeating: 0, count: 256)
+    func setMode(_ mode: ExposureMode) {
+        guard mode != exposureIndicatorMode else { return }
+        exposureIndicatorMode = mode
         waveformImage = nil
         histogramImage = nil
+        displayGeneration += 1
+        let generation = displayGeneration
+        renderQueue.async {
+            self.renderMode = mode
+            self.renderGeneration = generation
+            self.lastIndicatorFrameTimestamp = 0
+            self.smoothedHistogram = [Float](repeating: 0, count: 256)
+        }
     }
-    
-    func processWaveform(from pixelBuffer: CVPixelBuffer) {
-        guard !isWaveformProcessing else { return }
-        guard exposureIndicatorMode == .waveform,
-              let pipeline = waveformPipeline,
-              let queue = commandQueue,
-              let cache = textureCache else { return }
-        
-        let width = CVPixelBufferGetWidth(pixelBuffer)
-        let height = CVPixelBufferGetHeight(pixelBuffer)
-        var cvTexture: CVMetalTexture?
-        
-        CVMetalTextureCacheCreateTextureFromImage(kCFAllocatorDefault, cache, pixelBuffer, nil, .bgra8Unorm, width, height, 0, &cvTexture)
-        guard let cvTexture = cvTexture,
-              let inputTexture = CVMetalTextureGetTexture(cvTexture) else { return }
-        
+
+    func process(pixelBuffer: CVPixelBuffer) {
+        guard frameSlot.wait(timeout: .now()) == .success else { return }
+        renderQueue.async {
+            let now = ProcessInfo.processInfo.systemUptime
+            guard self.renderMode != .off,
+                  now - self.lastIndicatorFrameTimestamp >= self.indicatorFrameInterval,
+                  let texture = self.inputTexture(from: pixelBuffer) else {
+                self.frameSlot.signal()
+                return
+            }
+            let submitted: Bool
+            switch self.renderMode {
+            case .waveform: submitted = self.processWaveform(texture)
+            case .histogram: submitted = self.processHistogram(texture)
+            case .off: submitted = false
+            }
+            if submitted {
+                self.lastIndicatorFrameTimestamp = now
+            } else {
+                self.frameSlot.signal()
+            }
+        }
+    }
+
+    private func inputTexture(from pixelBuffer: CVPixelBuffer) -> CVMetalTexture? {
+        guard let cache = textureCache else { return nil }
+        var texture: CVMetalTexture?
+        CVMetalTextureCacheCreateTextureFromImage(kCFAllocatorDefault, cache, pixelBuffer, nil, .bgra8Unorm,
+                                                  CVPixelBufferGetWidth(pixelBuffer), CVPixelBufferGetHeight(pixelBuffer),
+                                                  0, &texture)
+        return texture
+    }
+
+    private func processWaveform(_ texture: CVMetalTexture) -> Bool {
+        guard let pipeline = waveformPipeline, let queue = commandQueue,
+              let inputTexture = CVMetalTextureGetTexture(texture) else { return false }
         // 输出纹理强制设为 128x64
         let desc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: .rgba8Unorm, width: overlayWidth, height: overlayHeight, mipmapped: false)
         desc.usage = [.shaderWrite, .shaderRead]
-        guard let outputTexture = device?.makeTexture(descriptor: desc) else { return }
+        guard let outputTexture = device?.makeTexture(descriptor: desc) else { return false }
         
         guard let commandBuffer = queue.makeCommandBuffer(),
-              let encoder = commandBuffer.makeComputeCommandEncoder() else { return }
-        isWaveformProcessing = true
+              let encoder = commandBuffer.makeComputeCommandEncoder() else { return false }
         
         encoder.setComputePipelineState(pipeline)
         encoder.setTexture(inputTexture, index: 0)
@@ -146,41 +137,31 @@ class MetalWHProcessor: ObservableObject {
         encoder.dispatchThreadgroups(threadGroups, threadsPerThreadgroup: threadGroupSize)
         encoder.endEncoding()
         
-        commandBuffer.addCompletedHandler { [weak self] _ in
-            guard let self = self else { return }
-            let cgImage = self.makeCGImage(from: outputTexture)
-            DispatchQueue.main.async {
-                self.isWaveformProcessing = false
-                if self.exposureIndicatorMode == .waveform {
-                    self.waveformImage = cgImage // storage target view
+        let generation = renderGeneration
+        commandBuffer.addCompletedHandler { [self, texture] buffer in
+            defer { frameSlot.signal() }
+            withExtendedLifetime(texture) {
+                guard buffer.status == .completed else { return }
+                let image = makeCGImage(from: outputTexture)
+                DispatchQueue.main.async {
+                    if self.displayGeneration == generation { self.waveformImage = image }
                 }
             }
         }
         commandBuffer.commit()
+        return true
     }
 
     // MARK: - Histogram Process
-    func processHistogram(from pixelBuffer: CVPixelBuffer) {
-        guard !isHistogramProcessing else { return }
-        guard exposureIndicatorMode == .histogram,
-              let pipeline = histogramPipeline,
-              let queue = commandQueue,
-              let cache = textureCache,
-              let hBuffer = histogramBuffer else { return }
-
-        let width = CVPixelBufferGetWidth(pixelBuffer)
-        let height = CVPixelBufferGetHeight(pixelBuffer)
-        var cvTexture: CVMetalTexture?
-        CVMetalTextureCacheCreateTextureFromImage(kCFAllocatorDefault, cache, pixelBuffer, nil, .bgra8Unorm, width, height, 0, &cvTexture)
-        guard let cvTexture = cvTexture,
-              let inputTexture = CVMetalTextureGetTexture(cvTexture) else { return }
+    private func processHistogram(_ texture: CVMetalTexture) -> Bool {
+        guard let pipeline = histogramPipeline, let queue = commandQueue, let hBuffer = histogramBuffer,
+              let inputTexture = CVMetalTextureGetTexture(texture) else { return false }
 
         // 重置统计数据
         memset(hBuffer.contents(), 0, hBuffer.length)
 
         guard let commandBuffer = queue.makeCommandBuffer(),
-              let encoder = commandBuffer.makeComputeCommandEncoder() else { return }
-        isHistogramProcessing = true
+              let encoder = commandBuffer.makeComputeCommandEncoder() else { return false }
 
         encoder.setComputePipelineState(pipeline)
         encoder.setTexture(inputTexture, index: 0)
@@ -196,21 +177,22 @@ class MetalWHProcessor: ObservableObject {
         encoder.dispatchThreadgroups(gridSize, threadsPerThreadgroup: threadsPerGroup)
         encoder.endEncoding()
         
-        commandBuffer.addCompletedHandler { [weak self] _ in
-            guard let self = self else { return }
-            let ptr = hBuffer.contents().bindMemory(to: UInt32.self, capacity: 256)
-            let counts = (0..<256).map { ptr[$0] }
-            self.renderQueue.async {
-                let cgImage = self.renderHistogramUI(counts: counts)
-                DispatchQueue.main.async {
-                    self.isHistogramProcessing = false
-                    if self.exposureIndicatorMode == .histogram {
-                        self.histogramImage = cgImage
+        let generation = renderGeneration
+        commandBuffer.addCompletedHandler { [self, texture] buffer in
+            withExtendedLifetime(texture) {
+                renderQueue.async {
+                    defer { self.frameSlot.signal() }
+                    guard buffer.status == .completed, self.renderGeneration == generation else { return }
+                    let ptr = hBuffer.contents().bindMemory(to: UInt32.self, capacity: 256)
+                    let image = self.renderHistogramUI(counts: Array(UnsafeBufferPointer(start: ptr, count: 256)))
+                    DispatchQueue.main.async {
+                        if self.displayGeneration == generation { self.histogramImage = image }
                     }
                 }
             }
         }
         commandBuffer.commit()
+        return true
     }
 
     private func renderHistogramUI(counts: [UInt32]) -> CGImage? {

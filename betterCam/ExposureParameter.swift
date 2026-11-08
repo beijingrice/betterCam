@@ -1,90 +1,5 @@
-//
-//  ToolFuncs.swift
-//  betterCam
-//
-//  Created by Rice on 2026/4/3.
-//
-
-import Foundation
 import AVFoundation
-import SwiftUI
-func changeParameter(for camera: Camera, direction: Int) {
-    
-    if camera.isAdjustingValue {
-        adjustValue(for: camera, direction: direction)
-    } else {
-        var pendingIndex: Int = 0
-        let newIndex = camera.activeIndex + direction
-        if newIndex >= camera.maxWidgetIndex + 2 { // direction = positive
-            pendingIndex = 0
-        } else if newIndex < 0 { // direction = negative
-            pendingIndex = camera.maxWidgetIndex + 1 // go to nothing selected index
-        } else {
-            pendingIndex = newIndex
-        }
-        DispatchQueue.main.async {
-            camera.activeIndex = pendingIndex
-        }
-    }
-}
-
-func adjustValue(for camera: Camera, direction: Int) {
-    // 提前把 pm 和 lm 拿出来，让代码更干净
-    let pm = camera.parameterManager
-    let lm = camera.lensManager
-    
-    switch camera.activeIndex {
-    case UIWidgets.AFMode.rawValue:
-        pm.AFMode = nextOption(in: pm.AFModeOptions, current: pm.AFMode, direction: direction)
-        
-    case UIWidgets.Style.rawValue:
-        pm.style = nextOption(in: pm.styleOptions, current: pm.style, direction: direction)
-        
-    case UIWidgets.SS.rawValue:
-        pm.SS = nextOption(in: pm.actualSSoptions, current: pm.SS, direction: direction)
-        
-    case UIWidgets.EV.rawValue:
-        let isManualMode = (pm.SS != "AUTO" && pm.ISO != "AUTO")
-        if !isManualMode {
-            pm.EV = nextOption(in: pm.EVOptions, current: pm.EV, direction: direction, isEV: true)
-        }
-        
-    case UIWidgets.ISO.rawValue:
-        pm.ISO = nextOption(in: pm.actualISOoptions, current: pm.ISO, direction: direction)
-        
-    case UIWidgets.lensSwitch.rawValue:
-        lm.switchLens(direction: direction)
-        
-    case UIWidgets.imageQuality.rawValue:
-        pm.imageQuality = nextOption(in: pm.imageQualityOptions, current: pm.imageQuality, direction: direction)
-        
-    default:
-        break
-    }
-}
-
-func nextOption(in options: [String], current: String, direction: Int, isEV: Bool = false) -> String {
-    guard !options.isEmpty else { return current }
-    let currentIndex = options.firstIndex(of: current) ?? 0
-    var nextIndex: Int = 0
-    if !isEV {
-        nextIndex = (currentIndex + direction) % options.count
-    } else {
-        // is EV mode
-        if (currentIndex + direction) >= options.count {
-            nextIndex = currentIndex
-        } else
-        if (currentIndex + direction) < 0 {
-            nextIndex = currentIndex
-        } else {
-            nextIndex = currentIndex + direction
-        }
-    }
-    if nextIndex < 0 {
-        nextIndex = options.count - 1
-    }
-    return options[nextIndex]
-}
+import Foundation
 
 enum ExposureParameter {
     static let auto = "AUTO"
@@ -185,10 +100,5 @@ extension Array where Element == String {
             return CMTimeCompare(duration, minDuration) >= 0 && CMTimeCompare(duration, maxDuration) <= 0
         }
     }
-    
-    func formattedISOoptions() -> [String] {
-        return self.map {
-            isoItem in Int(isoItem) != nil ? "ISO \(isoItem)" : isoItem
-        }
-    }
+
 }

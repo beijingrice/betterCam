@@ -1,0 +1,9 @@
+{
+  "id" : "c96a3c6f-c134-4757-919c-3c7172a27ceb",
+  "targets" : [
+    {
+      "id" : "3021a6a5-e308-4a32-a339-03df1500cd06",
+      "name" : "betterCam"
+    }
+  ]
+}

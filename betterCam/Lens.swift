@@ -47,15 +47,8 @@ struct Lens {
     }
     
     static func getAperture(device: AVCaptureDevice) -> String {
-        do {
-            try device.lockForConfiguration()
-            let aperture = device.lensAperture
-            let finalAperture = aperture > 0 ? aperture : (device.lensAperture > 0 ? device.lensAperture: 1.8)
-            return String(format: "F%.1f", finalAperture)
-        } catch {
-            print("Error when fetching aperture!")
-        }
-        return "F1.8"
+        let aperture = device.lensAperture
+        return String(format: "F%.1f", aperture > 0 ? aperture : 1.8)
     }
     
     static func getFocalLength(device: AVCaptureDevice) -> Int {

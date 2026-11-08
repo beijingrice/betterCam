@@ -1,176 +1,78 @@
-//
-//  TutorialOverlay.swift
-//  betterCam
-//
-//  Created by Rice on 2026/1/30.
-//
-
 import SwiftUI
 
 struct TutorialOverlay: View {
     @ObservedObject var camera: Camera
-    @State private var currentStep: Int = 1
-    
-    // 动画状态
-    @State private var offsetH: CGFloat = -15
-    @State private var offsetV: CGFloat = 15
-    
+    @State private var showsControls = false
+
     var body: some View {
-        GeometryReader { geo in
-            // 获取物理屏幕的宽高
-            let screenW = geo.size.width
-            let screenH = geo.size.height
-            
-            ZStack {
-                Color.black.opacity(0.8)
-                    .ignoresSafeArea()
-                
-                // 关键点：创建一个固定尺寸的容器，其尺寸是反向的
-                // 旋转后，这个容器会正好填满竖屏
-                Group {
-                    if currentStep == 1 {
-                        mainInfoView
-                            .transition(.asymmetric(insertion: .opacity, removal: .move(edge: .leading)))
-                    } else {
-                        dialAndShutterView
-                            .transition(.asymmetric(insertion: .move(edge: .trailing), removal: .opacity))
+        GeometryReader { geometry in
+            let wide = geometry.size.width >= 520
+            let columns = wide ? AnyLayout(HStackLayout(alignment: .top, spacing: 24))
+                               : AnyLayout(VStackLayout(alignment: .leading, spacing: 14))
+
+            VStack(spacing: 0) {
+                ScrollView {
+                    columns {
+                        if showsControls {
+                            section("Physical Control:") {
+                                Text("Rotate the dial to switch items")
+                                Text("Press center to select")
+                            }
+                            section("Capture:") {
+                                Text("Press the shutter button to shoot.")
+                            }
+                        } else {
+                            section("In camera screen:") {
+                                Label("Swipe horizontally for Profile Intensity", systemImage: "arrow.left.and.right")
+                                Label("Swipe vertically for Grain", systemImage: "arrow.up.and.down")
+                            }
+                            section("In bottom bar of camera screen:") {
+                                Text("In STYLE, select MANAGE and press the center of the dial to open your LUTs.")
+                                Text("Swipe left to rename or delete.")
+                            }
+                        }
                     }
+                    .padding(wide ? 24 : 14)
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .frame(width: screenH, height: screenW) // 交换宽高
-                .rotationEffect(.degrees(90))           // 顺时针旋转90度
-                .offset(x: -(screenW / 4))
+                .id(showsControls)
+                .scrollBounceBehavior(.basedOnSize)
+
+                Divider()
+                HStack {
+                    Spacer()
+                    Button(action: advance) {
+                        Text(showsControls ? LocalizedStringKey("Start Shooting") : LocalizedStringKey("Got it"))
+                            .font(.subheadline.weight(.semibold))
+                            .padding(.horizontal, 18)
+                            .frame(minHeight: 44)
+                    }
+                    .foregroundStyle(.white)
+                }
+                .padding(.horizontal, 4)
             }
-            .frame(width: screenW, height: screenH)
         }
+        .background(Color(white: 0.06))
+        .foregroundStyle(.white)
         .preferredColorScheme(.dark)
+        .clipped()
     }
 
-    // MARK: - 第一阶段视图
-    private var mainInfoView: some View {
-        HStack(spacing: 40) {
-            VStack(spacing: 25) {
-                Text("In camera screen:")
-                    .font(.title3.bold())
-                gestureSection(icon: "hand.draw.fill", text: "Swipe horizontally for Profile Intensity", offset: offsetH, isHorizontal: true)
-                gestureSection(icon: "hand.draw.fill", text: "Swipe vertically for Grain", offset: offsetV, isHorizontal: false)
-                
-                nextButton(label: "Got it") {
-                    withAnimation(.spring()) { currentStep = 2 }
-                }
-            }
-            .frame(maxWidth: .infinity)
-            
-            lutInfoSection
-                .frame(maxWidth: .infinity, alignment: .leading)
+    private func section<Content: View>(_ title: LocalizedStringKey,
+                                        @ViewBuilder content: () -> Content) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title).font(.subheadline.weight(.semibold))
+            content().font(.footnote).foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 60)
-        .onAppear {
-            withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
-                offsetH = 15
-                offsetV = -15
-            }
-        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    // MARK: - 第二阶段视图
-    private var dialAndShutterView: some View {
-        HStack(spacing: 60) {
-            // 左侧：拨盘
-            VStack(spacing: 20) {
-                Text("Physical Control:")
-                    .font(.title3.bold())
-                
-                KnurledDialView() // 假设你已有此组件
-                    .allowsHitTesting(false)
-                    .frame(height: 120)
-                    .padding(.vertical, 40)
-                
-                VStack(alignment: .center, spacing: 4) {
-                    Text("Rotate the dial to switch items")
-                    Text("Press center to select")
-                }
-                .font(.subheadline)
-            }
-            .frame(maxWidth: .infinity)
-
-            // 右侧：快门
-            VStack(spacing: 20) {
-                Text("Capture:")
-                    .font(.title3.bold())
-                
-                ShutterButtonView() // 假设你已有此组件
-                    .allowsHitTesting(false)
-                    .frame(height: 120)
-
-                Text("Press the shutter button to shoot.")
-                    .font(.subheadline)
-                
-                Spacer().frame(height: 20)
-
-                nextButton(label: "Start Shooting") {
-                    withAnimation(.easeInOut(duration: 0.5)) {
-                        camera.hasCompletedTutorial = true
-                        camera.isShowingTutorial = false
-                    }
-                }
-            }
-            .frame(maxWidth: .infinity)
-        }
-        .padding(.horizontal, 60)
-    }
-    
-    // MARK: - 辅助组件
-    private func nextButton(label: LocalizedStringKey, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
-            Text(label)
-                .font(.headline)
-                .frame(width: 160, height: 44)
-                .background(Color.white)
-                .foregroundColor(.black)
-                .cornerRadius(22)
+    private func advance() {
+        if showsControls {
+            camera.hasCompletedTutorial = true
+            camera.isShowingTutorial = false
+        } else {
+            showsControls = true
         }
     }
-    
-    private func gestureSection(icon: String, text: LocalizedStringKey, offset: CGFloat, isHorizontal: Bool) -> some View {
-        VStack(spacing: 12) {
-            HStack {
-                if isHorizontal {
-                    Image(systemName: "arrow.left")
-                    Image(systemName: icon).offset(x: offset)
-                    Image(systemName: "arrow.right")
-                } else {
-                    VStack {
-                        Image(systemName: "arrow.up")
-                        Image(systemName: icon).offset(y: offset)
-                        Image(systemName: "arrow.down")
-                    }
-                }
-            }
-            .font(.system(size: 32))
-            Text(text).font(.caption).multilineTextAlignment(.center)
-        }
-    }
-    
-    private var lutInfoSection: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("In bottom bar of camera screen:")
-                .font(.title3.bold())
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Look for STYLE parameter,")
-                Text("Usually it's STD when launched.")
-                Text("Change it to MANAGE then click the")
-                Text("middle button of the dial to manage LUTs.")
-            }
-            Divider().background(Color.white.opacity(0.3)).padding(.vertical, 5)
-            VStack(alignment: .leading, spacing: 6) {
-                Text("In LUT management view,")
-                Text("Swipe left to rename or delete.")
-            }
-        }
-        .font(.subheadline)
-    }
-}
-
-#Preview {
-    TutorialOverlay(camera: Camera())
 }

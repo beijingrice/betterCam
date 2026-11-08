@@ -29,29 +29,23 @@ struct Provider: TimelineProvider {
     }
 
     func getSnapshot(in context: Context, completion: @escaping (SimpleEntry) -> ()) {
-        let prefs = UserDefaults(suiteName: "group.com.rice.betterCam")
-        let total = prefs?.integer(forKey: "total_shutter") ?? 0
-        let today = prefs?.integer(forKey: ShutterManager.getTodayKey()) ?? 0
-        let sessionCount = prefs?.integer(forKey: "session_count") ?? 0
-        let ss = prefs?.string(forKey: "last_SS") ?? "AUTO"
-        let iso = prefs?.string(forKey: "last_ISO") ?? "AUTO"
-        
-        let entry = SimpleEntry(date: Date(), totalCount: total, todayCount: today, sessionCount: sessionCount, lastSS: ss, lastISO: iso)
-        completion(entry)
+        completion(currentEntry())
     }
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<Entry>) -> ()) {
-        // 逻辑同 getSnapshot
-        let prefs = UserDefaults(suiteName: "group.com.rice.betterCam")
-        let total = prefs?.integer(forKey: "total_shutter") ?? 0
-        let today = prefs?.integer(forKey: ShutterManager.getTodayKey()) ?? 0
-        let sessionCount = prefs?.integer(forKey: "session_count") ?? 0
-        let ss = prefs?.string(forKey: "last_SS") ?? "AUTO"
-        let iso = prefs?.string(forKey: "last_ISO") ?? "AUTO"
-        
-        let entry = SimpleEntry(date: Date(), totalCount: total, todayCount: today, sessionCount: sessionCount, lastSS: ss, lastISO: iso)
-        let timeline = Timeline(entries: [entry], policy: .atEnd)
-        completion(timeline)
+        completion(Timeline(entries: [currentEntry()], policy: .atEnd))
+    }
+
+    private func currentEntry() -> SimpleEntry {
+        let prefs = UserDefaults(suiteName: ShutterManager.suiteName)
+        return SimpleEntry(
+            date: Date(),
+            totalCount: prefs?.integer(forKey: ShutterManager.TOTAL_SHUTTER_KEY) ?? 0,
+            todayCount: prefs?.integer(forKey: ShutterManager.getTodayKey()) ?? 0,
+            sessionCount: prefs?.integer(forKey: "session_count") ?? 0,
+            lastSS: prefs?.string(forKey: "last_SS") ?? "AUTO",
+            lastISO: prefs?.string(forKey: "last_ISO") ?? "AUTO"
+        )
     }
 }
 

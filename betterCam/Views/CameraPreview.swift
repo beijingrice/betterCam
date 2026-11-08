@@ -10,8 +10,9 @@ import AVFoundation
 import AVKit
 
 struct CameraPreview: View {
+    @Environment(\.cameraPreviewOrientation) private var previewOrientation
     @EnvironmentObject var camera: Camera
-    let aspectRatio: CGSize = CGSize(width: 4.0, height: 3.0)
+    @EnvironmentObject private var lensManager: LensManager
     @State private var lastDragLocation: CGPoint?
     
     @State private var focusPoint: CGPoint?
@@ -21,13 +22,18 @@ struct CameraPreview: View {
     @State private var showHUD: Bool = false
     @State private var hudText: String = ""
     @State private var hudTimer: Timer?
+
     
     var body: some View {
         GeometryReader { geometry in
             ZStack {
-                if camera.permissionManager.isFullyAuthorized {
+                if lensManager.currentLens == nil {
+                    Image(systemName: "camera.fill")
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .accessibilityLabel("Camera unavailable")
+                } else if camera.permissionManager.isFullyAuthorized {
                     CaptureInteractionView(camera: camera)
-                        .ignoresSafeArea()
                     actualPreviewLayer(in: geometry.size)
                 } else if camera.permissionManager.cameraPermission == .denied || camera.permissionManager.photoPermission == .denied {
                     // 💡 只要有一个拒绝，就显示图文提示
@@ -45,33 +51,22 @@ struct CameraPreview: View {
         ZStack {
             // 1. 底层预览图
             if let image = camera.currentPreviewImage {
-                Image(image, scale: 1.0, orientation: .up, label: Text("Preview"))
+                Image(image, scale: 1.0, orientation: previewOrientation, label: Text("Preview"))
                     .resizable()
-                    .aspectRatio(aspectRatio, contentMode: .fit)
+                    .scaledToFit()
                     .blur(radius: camera.isSwitchingLens ? 30 : 0)
                     .clipped()
             } else {
                 Color.black
             }
             
-            ZStack(alignment: .bottomTrailing) { // 锁定右下角
-                Color.clear // 撑开空间
+            ZStack {
                 WaveformOverlay()
-                    .padding(.bottom, 40)  // 距离底部边距
-                    .padding(.trailing, 0) // 距离右侧边距
-                    .transition(.opacity)
-            }
-            
-            ZStack(alignment: .bottomTrailing) { // 锁定右下角
-                Color.clear // 撑开空间
                 HistogramOverlay()
-                    .padding(.bottom, 40)  // 距离底部边距
-                    .padding(.trailing, 0) // 距离右侧边距
-                    .transition(.opacity)
             }
-            
-            
-            
+            .padding(.bottom, 40)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomTrailing)
+
             // 2. 整合后的交互层 (手势 + 对焦)
             Color.clear
                 .contentShape(Rectangle())
@@ -181,18 +176,27 @@ struct CameraPreview: View {
         }
     }
     
+
     private func handleTapToFocus(at location: CGPoint, in size: CGSize) {
-        // 1. 显示 UI 上的对焦框
+        guard let image = camera.currentPreviewImage else { return }
+        let portrait = previewOrientation == .right || previewOrientation == .left
+        let imageSize = CGSize(width: CGFloat(portrait ? image.height : image.width),
+                               height: CGFloat(portrait ? image.width : image.height))
+        let rect = AVMakeRect(aspectRatio: imageSize, insideRect: CGRect(origin: .zero, size: size))
+        guard rect.contains(location), rect.width > 0, rect.height > 0 else { return }
+        let x = (location.x - rect.minX) / rect.width
+        let y = (location.y - rect.minY) / rect.height
+        var cameraPoint: CGPoint
+        switch previewOrientation {
+        case .right: cameraPoint = CGPoint(x: y, y: 1 - x)
+        case .left: cameraPoint = CGPoint(x: 1 - y, y: x)
+        case .down: cameraPoint = CGPoint(x: 1 - x, y: 1 - y)
+        default: cameraPoint = CGPoint(x: x, y: y)
+        }
+        if lensManager.currentLens?.device.position == .front {
+            cameraPoint.y = 1 - cameraPoint.y // Undo the front preview's downMirrored transform.
+        }
         focusPoint = location
-        
-        // 2. 坐标转换：将屏幕上的 (x, y) 转换为摄像头需要的 (0~1, 0~1)
-        // ⚠️ 重点：AVFoundation 的坐标系 y 轴是横着的，且 (0,0) 在右上角（景观模式下）
-        // 但在竖屏 photo 模式下，简单的单位比例转换通常可行
-        let focusX = location.x / size.width
-        let focusY = location.y / size.height
-        let cameraPoint = CGPoint(x: focusX, y: focusY)
-        
-        // 3. 执行对焦
         camera.focus(at: cameraPoint)
         
         // 4. 自动隐藏对焦框

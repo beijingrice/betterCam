@@ -48,6 +48,11 @@ enum UIWidgets: Int, CaseIterable {
 }
     
 enum ExposureMode { case waveform, histogram, off }
+
+enum PhotoResolutionMode: String, CaseIterable {
+    case standard = "24MP"
+    case high48MP = "48MP"
+}
     
 enum ShutterSoundMode: String, CaseIterable {
     case sony       = "shutter_eqed_gained"

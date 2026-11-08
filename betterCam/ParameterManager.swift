@@ -22,14 +22,14 @@ class ParameterManager: ObservableObject {
     @Published var Aperture: String = "F1.8"
     @Published var aspectRatio: String = "4:3"
     @Published var currentFocalLength: Int = 26
+    @Published var photoResolutionMode: PhotoResolutionMode = .standard
     
     @Published var actualSSoptions: [String] = []
     @Published var actualISOoptions: [String] = []
     @Published var styleOptions: [String] = []
-    let imageQualityOptions: [String] = ["DNG+J", "DNG", "JPEG"]
+    let imageQualityOptions: [String] = ["DNG+J", "DNG", "ProRAW", "JPEG"]
     let AFModeOptions: [String] = ["AF-C", "AF-S"]
     let EVOptions: [String] = ParameterAvailable.EVoptions
-    // TODO: Pass lens SS & ISO info to lists above
         
     // Apply changes in next launch, okay with @AppStorage
     @AppStorage("enablePermanentParameterStorage") var enablePermanentStorage: Bool = false
@@ -46,7 +46,7 @@ class ParameterManager: ObservableObject {
     let isPureRawEngineEnabledKey: String = "isPureRawEngineEnabled"
     
     // UserDefaults, but shared with home screen widget
-    let prefs = UserDefaults(suiteName: "group.com.rice.betterCam")
+    let prefs = UserDefaults(suiteName: ShutterManager.suiteName)
         
     private var cancellables = Set<AnyCancellable>()
     
@@ -64,18 +64,9 @@ class ParameterManager: ObservableObject {
     }
     
     func syncAllLUTsToOptions() {
-        // 获取 FilmEngine 里所有的胶片名（包括内置和用户导入的）
-        let allNames = FilmEngine.shared.availableSimulations.map { $0.name }
-        styleOptions = []
-        for name in allNames {
-            if !styleOptions.contains(name) {
-                // TODO: Change it back to ADD
-                styleOptions.append(name)
-            }
-        }
-        if !styleOptions.contains("MANAGE") {
-            styleOptions.append("MANAGE")
-        }
+        let names = FilmEngine.shared.availableSimulations.map(\.name) + ["MANAGE"]
+        var seen = Set<String>()
+        styleOptions = names.filter { seen.insert($0).inserted }
     }
         
     // 💡 3. 参数持久化逻辑
@@ -149,9 +140,9 @@ class ParameterManager: ObservableObject {
     private func setupAutoSync() {
         // 监听所有可能需要存盘的参数
         Publishers.CombineLatest($SS, $ISO)
-                    .debounce(for: .seconds(1), scheduler: RunLoop.main)
-                    .sink { [weak self] _, _ in self?.saveExposureParameters() }
-                    .store(in: &cancellables)
+            .debounce(for: .seconds(1), scheduler: RunLoop.main)
+            .sink { [weak self] _, _ in self?.saveExposureParameters() }
+            .store(in: &cancellables)
     }
     
     // MARK: - AUTO 联动逻辑 (替代以前的 autoAmode 和 didSet)
@@ -159,12 +150,12 @@ class ParameterManager: ObservableObject {
     private func setupAutoModeLogic() {
         // 监听 SS 变化
         $SS.dropFirst().removeDuplicates().receive(on: DispatchQueue.main)
-                    .sink { [weak self] newSS in self?.handleSSChange(newSS) }
-                    .store(in: &cancellables)
+            .sink { [weak self] newSS in self?.handleSSChange(newSS) }
+            .store(in: &cancellables)
                 // 监听 ISO 变化
         $ISO.dropFirst().removeDuplicates().receive(on: DispatchQueue.main)
-                    .sink { [weak self] newISO in self?.handleISOChange(newISO) }
-                    .store(in: &cancellables)
+            .sink { [weak self] newISO in self?.handleISOChange(newISO) }
+            .store(in: &cancellables)
     }
     
     private func handleSSChange(_ newSS: String) {
