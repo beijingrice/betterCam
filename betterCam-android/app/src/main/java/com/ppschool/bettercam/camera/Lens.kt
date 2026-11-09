@@ -36,6 +36,8 @@ data class Lens(
     val supportsRaw: Boolean,
     val evStep: Float,
     val evRange: IntRange,
+    /** The primary back camera at 1x: the default lens, like the iOS wide-angle camera. */
+    val isMain: Boolean = false,
 )
 
 object LensDiscovery {
@@ -53,8 +55,10 @@ object LensDiscovery {
         if (primary != null) {
             val pc = chars[primary]!!
             val mainEq = equivalentFocal(pc)
+            fun covered(eq: Float) = lenses.any { abs(it.equivalentFocalLength - eq) < 3f }
             lenses += makeLens(primary, pc, 1f, mainEq, null, apertureFrom(pc))
 
+            // Other lenses of a logical multi-camera are reached through CONTROL_ZOOM_RATIO.
             val zoomRange = if (Build.VERSION.SDK_INT >= 30) pc.get(CameraCharacteristics.CONTROL_ZOOM_RATIO_RANGE) else null
             val caps = pc.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES) ?: IntArray(0)
             val isLogical = caps.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_LOGICAL_MULTI_CAMERA)
@@ -66,7 +70,7 @@ object LensDiscovery {
                     val ratio = (eq / mainEq).coerceIn(zoomRange.lower, zoomRange.upper)
                     if (abs(ratio - 1f) < 0.15f) continue
                     val actualEq = mainEq * ratio
-                    if (lenses.any { abs(it.equivalentFocalLength - actualEq) < 3f }) continue
+                    if (covered(actualEq)) continue
                     lenses += makeLens(primary, pc, ratio, actualEq, null, apertureFrom(phc))
                 }
             }
@@ -74,10 +78,15 @@ object LensDiscovery {
             for (id in backs.drop(1)) {
                 val c = chars[id] ?: continue
                 val eq = equivalentFocal(c)
-                if (eq <= 0f || lenses.any { abs(it.equivalentFocalLength - eq) < 3f }) continue
+                if (eq <= 0f || covered(eq)) continue
                 val caps2 = c.get(CameraCharacteristics.REQUEST_AVAILABLE_CAPABILITIES) ?: IntArray(0)
                 if (!caps2.contains(CameraMetadata.REQUEST_AVAILABLE_CAPABILITIES_BACKWARD_COMPATIBLE)) continue
                 lenses += makeLens(id, c, 1f, eq, null, apertureFrom(c))
+            }
+
+            // The default lens is the one matching the primary (wide) camera, like iOS.
+            lenses.minByOrNull { abs(it.equivalentFocalLength - mainEq) }?.let { main ->
+                lenses[lenses.indexOf(main)] = main.copy(isMain = true)
             }
         }
         lenses.sortBy { it.equivalentFocalLength }
@@ -93,7 +102,7 @@ object LensDiscovery {
     }
 
     fun defaultLens(lenses: List<Lens>): Lens? =
-        lenses.firstOrNull { !it.isFront && it.zoomRatio == 1f } ?: lenses.firstOrNull()
+        lenses.firstOrNull { it.isMain } ?: lenses.firstOrNull { !it.isFront } ?: lenses.firstOrNull()
 
     private fun apertureFrom(c: CameraCharacteristics): String {
         val a = c.get(CameraCharacteristics.LENS_INFO_AVAILABLE_APERTURES)?.firstOrNull() ?: 0f
@@ -107,6 +116,14 @@ object LensDiscovery {
         val diag = sqrt(size.width * size.width + size.height * size.height)
         if (diag <= 0f) return 0f
         return f * 43.27f / diag
+    }
+
+    /** Snap to the marketed focal length when close (iOS does the same hard calibration in Lens.swift). */
+    private val standardFocals = intArrayOf(13, 14, 16, 18, 24, 26, 28, 35, 48, 50, 70, 77, 85, 105, 120, 125)
+
+    private fun snapFocal(eq: Float): Int {
+        val nearest = standardFocals.minByOrNull { abs(it - eq) } ?: return eq.roundToInt()
+        return if (abs(nearest - eq) <= 1.5f) nearest else eq.roundToInt()
     }
 
     private fun makeLens(
@@ -132,7 +149,7 @@ object LensDiscovery {
             key = "$id@$zoom",
             cameraId = id,
             zoomRatio = zoom,
-            equivalentFocalLength = eq.roundToInt(),
+            equivalentFocalLength = snapFocal(eq),
             aperture = aperture,
             isFront = front,
             displayName = displayName,
@@ -151,7 +168,12 @@ object LensDiscovery {
     }
 }
 
-/** Port of PhotoDimensions.swift: picks 12/24/48 MP capture sizes from what the sensor supports. */
+/**
+ * Port of PhotoDimensions.swift, adapted to Android: instead of the iPhone's fixed 24/48 MP,
+ * "standard" is the sensor's normal 4:3 output (24 MP class if offered, else ~12 MP) and "high"
+ * is the largest 4:3 size the phone really offers (e.g. 48/50/108/200 MP), regular or
+ * maximum-resolution mode, if it is meaningfully larger than standard.
+ */
 class PhotoDimensions(supported: List<Size>, maxResSupported: List<Size> = emptyList()) {
     val nativeRAW: Size?
     val medium: Size?
@@ -162,19 +184,19 @@ class PhotoDimensions(supported: List<Size>, maxResSupported: List<Size> = empty
     init {
         fun px(s: Size) = s.width.toLong() * s.height
         fun closest(list: List<Size>, target: Long) = list.minByOrNull { abs(px(it) - target) }
-        val fourThree = supported.filter { abs(it.width.toFloat() / it.height - 4f / 3f) < 0.02f }.ifEmpty { supported }
-        nativeRAW = closest(fourThree, 12_000_000)
-        medium = closest(fourThree, 24_000_000)?.takeIf { px(it) in 18_000_000 until 40_000_000 }
-        val regularHigh = closest(fourThree, 48_000_000)?.takeIf { px(it) >= 40_000_000 }
-        if (regularHigh != null) {
-            high = regularHigh
-            highNeedsMaxResolution = false
-        } else {
-            val mr = maxResSupported.filter { abs(it.width.toFloat() / it.height - 4f / 3f) < 0.02f }.ifEmpty { maxResSupported }
-            high = closest(mr, 48_000_000)?.takeIf { px(it) >= 40_000_000 }
-            highNeedsMaxResolution = high != null
-        }
+        fun fourThree(list: List<Size>) = list.filter { abs(it.width.toFloat() / it.height - 4f / 3f) < 0.02f }.ifEmpty { list }
+        val regular = fourThree(supported)
+        nativeRAW = closest(regular, 12_000_000)
+        medium = closest(regular, 24_000_000)?.takeIf { px(it) in 18_000_000 until 40_000_000 }
+        val standardPx = (medium ?: nativeRAW)?.let { px(it) } ?: 0L
+        val candidates = (regular + fourThree(maxResSupported)).distinct()
+        high = candidates.maxByOrNull { px(it) }?.takeIf { standardPx > 0 && px(it) >= standardPx * 3 / 2 }
+        highNeedsMaxResolution = high != null && high !in supported
     }
 
     val standard: Size? get() = medium ?: nativeRAW
+
+    companion object {
+        fun megapixels(s: Size?): Int? = s?.let { ((it.width.toLong() * it.height) / 1_000_000.0).roundToInt() }
+    }
 }

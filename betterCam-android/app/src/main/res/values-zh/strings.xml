@@ -18,12 +18,8 @@
     <string name="prefer_auto">启动时默认选择AUTO模式</string>
     <string name="image_quality">画质</string>
     <string name="photo_resolution">照片分辨率</string>
-    <string name="resolution_note">24MP 和 48MP 仅适用于处理后的照片。RAW 格式使用传感器支持的 RAW 分辨率。Android 不支持 Apple ProRAW；DNG 需要相机支持 RAW。</string>
+    <string name="resolution_note">分辨率选项取决于本机相机：标准为传感器的常规尺寸，高分辨率使用其最大模式（如有）。仅适用于处理后的照片；RAW 格式使用传感器的 RAW 分辨率。Android 不支持 Apple ProRAW；DNG 需要相机支持 RAW。</string>
     <string name="enable_zero_processing">启用零处理模式</string>
-    <string name="buy_coffee_title">赏开发者一杯咖啡</string>
-    <string name="buy_coffee_button">给我买杯咖啡吧！</string>
-    <string name="thank_you">谢谢你！</string>
-    <string name="already_donated">哦！你已经打赏过我了！谢谢你！</string>
     <string name="ok">OK</string>
     <string name="cancel">取消</string>
     <string name="done">完成</string>

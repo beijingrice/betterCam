@@ -50,18 +50,28 @@ object FilmEngine {
     var libraryVersion by mutableIntStateOf(0)
         private set
 
-    private val workers = Executors.newFixedThreadPool(max(2, Runtime.getRuntime().availableProcessors() - 1))
+    private val workers = Executors.newFixedThreadPool(
+        max(2, Runtime.getRuntime().availableProcessors() / 2),
+        com.ppschool.bettercam.camera.BackgroundThreads.factory("bettercam.film")
+    )
 
     fun init(context: Context) {
         if (::appContext.isInitialized) return
         appContext = context.applicationContext
-        val t0 = System.nanoTime()
-        val list = mutableListOf<FilmSimulation>()
-        list += BuiltInLooks.all()
-        list += loadBundleLUTs(list)
-        list += loadSavedCustomLUTs()
-        availableSimulations = list
-        Log.i(TAG, "loaded ${list.size} looks in ${(System.nanoTime() - t0) / 1_000_000} ms")
+        val builtIns = BuiltInLooks.all()
+        val custom = loadSavedCustomLUTs()
+        availableSimulations = builtIns + custom
+        // The bundled .cube files are ~1 MB each; parse them off the main thread.
+        Thread({
+            val t0 = System.nanoTime()
+            val bundled = loadBundleLUTs(builtIns)
+            android.os.Handler(android.os.Looper.getMainLooper()).post {
+                val imported = availableSimulations.filter { it.type == FilmStyleType.LUT }
+                availableSimulations = builtIns + bundled + imported
+                libraryVersion++
+            }
+            Log.i(TAG, "bundled LUTs parsed in ${(System.nanoTime() - t0) / 1_000_000} ms")
+        }, "bettercam.luts").start()
     }
 
     fun simulation(named: String): FilmSimulation? = availableSimulations.firstOrNull { it.name == named }

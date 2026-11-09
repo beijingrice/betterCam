@@ -12,12 +12,15 @@ android {
         applicationId = "com.ppschool.bettercam"
         minSdk = 30
         targetSdk = 35
-        versionCode = 17
-        versionName = "1.7"
+        versionCode = 1
+        versionName = "1.0"
     }
 
     buildTypes {
         release {
+            // Test builds are signed with the local debug key so they install directly (adb / file).
+            // Replace with a real upload key before publishing to Google Play.
+            signingConfig = signingConfigs.getByName("debug")
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
@@ -51,7 +54,5 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
     implementation("androidx.exifinterface:exifinterface:1.3.7")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
-    implementation("com.android.billingclient:billing-ktx:7.1.1")
-    implementation("androidx.fragment:fragment-ktx:1.8.5") // billing pulls an old Fragment transitively
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

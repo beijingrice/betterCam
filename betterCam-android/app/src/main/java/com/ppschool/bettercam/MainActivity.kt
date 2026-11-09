@@ -14,12 +14,10 @@ import androidx.compose.material3.darkColorScheme
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
-import com.ppschool.bettercam.billing.StoreManager
 import com.ppschool.bettercam.ui.BetterCamRoot
 
 class MainActivity : ComponentActivity() {
     private val model: CameraModel by viewModels()
-    private lateinit var store: StoreManager
 
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { model.onPermissionResult(it) }
@@ -29,12 +27,11 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         hideSystemBars()
-        store = StoreManager(applicationContext)
         model.permissionRequester = { permissionLauncher.launch(Manifest.permission.CAMERA) }
         model.requestPermissionIfNeeded()
         setContent {
             MaterialTheme(colorScheme = darkColorScheme()) {
-                BetterCamRoot(model, store)
+                BetterCamRoot(model)
             }
         }
     }
@@ -59,11 +56,6 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         model.onForegroundChanged(false)
         super.onStop()
-    }
-
-    override fun onDestroy() {
-        store.close()
-        super.onDestroy()
     }
 
     /** Volume / camera keys trigger the shutter (AVCaptureEventInteraction on iOS). */

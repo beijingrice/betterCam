@@ -16,7 +16,6 @@ import android.hardware.camera2.TotalCaptureResult
 import android.hardware.camera2.params.MeteringRectangle
 import android.hardware.camera2.params.OutputConfiguration
 import android.hardware.camera2.params.SessionConfiguration
-import android.media.Image
 import android.media.ImageReader
 import android.os.Build
 import android.os.Handler
@@ -47,7 +46,8 @@ class CameraController(context: Context, private val events: Events) {
         fun onCameraError(message: String)
     }
 
-    data class Capabilities(val supports24MP: Boolean, val supports48MP: Boolean, val supportsRaw: Boolean)
+    /** [standardMP]/[highMP] are the phone's real capture sizes; [highMP] is null when there is no larger mode. */
+    data class Capabilities(val standardMP: Int?, val highMP: Int?, val supportsRaw: Boolean)
 
     enum class SizeMode { STANDARD, RAW_NATIVE, HIGH }
 
@@ -66,7 +66,7 @@ class CameraController(context: Context, private val events: Events) {
     private class CaptureCtx(val id: Long, val request: PhotoCaptureRequest, val expectedImages: Int) {
         var timestamp = -1L
         var result: TotalCaptureResult? = null
-        var rawImage: Image? = null
+        var rawFrame: RawDeveloper.RawFrame? = null
         var rawStarted = false
         var receivedImages = 0
         var pendingJobs = 0
@@ -79,7 +79,7 @@ class CameraController(context: Context, private val events: Events) {
     private val thread = HandlerThread("bettercam.session").apply { start() }
     private val handler = Handler(thread.looper)
     private val executor = Executor { handler.post(it) }
-    private val processing = Executors.newSingleThreadExecutor()
+    private val processing = Executors.newSingleThreadExecutor(BackgroundThreads.factory("bettercam.processing"))
 
     // State (camera thread only)
     private var running = false
@@ -104,7 +104,7 @@ class CameraController(context: Context, private val events: Events) {
     private val contexts = HashMap<Long, CaptureCtx>()
     private val byTimestamp = HashMap<Long, CaptureCtx>()
     private val pendingJpeg = HashMap<Long, ByteArray>()
-    private val pendingRaw = HashMap<Long, Image>()
+    private val pendingRaw = HashMap<Long, RawDeveloper.RawFrame>()
 
     // ------------------------------------------------------------------ public API
 
@@ -226,8 +226,8 @@ class CameraController(context: Context, private val events: Events) {
         val lens = config?.lens
         events.onCapabilities(
             Capabilities(
-                supports24MP = d?.medium != null,
-                supports48MP = d?.high != null && !highResBroken,
+                standardMP = PhotoDimensions.megapixels(d?.standard),
+                highMP = if (highResBroken) null else PhotoDimensions.megapixels(d?.high),
                 supportsRaw = lens?.supportsRaw == true,
             )
         )
@@ -433,6 +433,7 @@ class CameraController(context: Context, private val events: Events) {
         val jpeg = jpegReader
         val key = activeKey
         if (s == null || dev == null || jpeg == null || key == null) {
+            Log.w(TAG, "capture without an active session")
             events.onCaptureFailed(); return
         }
         val raw = rawReader
@@ -461,13 +462,31 @@ class CameraController(context: Context, private val events: Events) {
         val ctx = CaptureCtx(id, req.copy(imageQuality = if (!wantRaw && req.needsRaw) "JPEG" else req.imageQuality),
             (if (wantJpeg) 1 else 0) + (if (wantRaw) 1 else 0))
         contexts[id] = ctx
+        Log.d(TAG, "capture #$id jpeg=$wantJpeg raw=$wantRaw quality=${req.imageQuality} pureRaw=${req.usePureRawEngine}")
         try {
             s.capture(b.build(), captureCallback, handler)
+            // Safety net: if the camera never answers, report it and unlock the shutter.
+            val exposureMs = (req.manualExposureNs ?: 0L) / 1_000_000L
+            handler.postDelayed({ captureTimedOut(ctx) }, CAPTURE_TIMEOUT_MS + exposureMs)
         } catch (e: Exception) {
             Log.e(TAG, "capture failed", e)
             contexts.remove(id)
             events.onCaptureFailed()
         }
+    }
+
+    /**
+     * Called when a still produced no result, failure or buffer-lost callback in time. A conforming
+     * HAL always reports one of those, so this only logs the problem and unlocks the shutter.
+     */
+    private fun captureTimedOut(ctx: CaptureCtx) {
+        if (ctx.captureFinished || ctx.released) return
+        Log.w(TAG, "capture #${ctx.id}: no result from the camera after ${CAPTURE_TIMEOUT_MS} ms (request dropped by the HAL?)")
+        ctx.released = true
+        contexts.remove(ctx.id)
+        if (ctx.timestamp >= 0) byTimestamp.remove(ctx.timestamp)
+        ctx.rawFrame = null
+        events.onCaptureFailed()
     }
 
     private val captureCallback = object : CameraCaptureSession.CaptureCallback() {
@@ -493,7 +512,7 @@ class CameraController(context: Context, private val events: Events) {
         override fun onCaptureFailed(session: CameraCaptureSession, request: CaptureRequest, failure: CaptureFailure) {
             val ctx = contexts.remove(request.tag as? Long ?: return) ?: return
             if (ctx.timestamp >= 0) byTimestamp.remove(ctx.timestamp)
-            ctx.rawImage?.close()
+            ctx.rawFrame = null
             ctx.released = true
             events.onCaptureFailed()
         }
@@ -515,10 +534,16 @@ class CameraController(context: Context, private val events: Events) {
         if (ctx == null) pendingJpeg[ts] = bytes else handleJpeg(ctx, bytes)
     }
 
+    /**
+     * Copies the RAW pixels out and returns the buffer to the camera immediately, so the DNG write and
+     * development never hold camera buffers (the camera needs them for the next shot).
+     */
     private fun onRaw(reader: ImageReader) {
         val img = try { reader.acquireNextImage() } catch (e: Exception) { null } ?: return
-        val ctx = byTimestamp[img.timestamp]
-        if (ctx == null) pendingRaw[img.timestamp] = img else handleRaw(ctx, img)
+        val ts = img.timestamp
+        val frame = try { RawDeveloper.copy(img) } finally { img.close() }
+        val ctx = byTimestamp[ts]
+        if (ctx == null) pendingRaw[ts] = frame else handleRaw(ctx, frame)
     }
 
     private fun handleJpeg(ctx: CaptureCtx, bytes: ByteArray) {
@@ -533,14 +558,14 @@ class CameraController(context: Context, private val events: Events) {
         }
     }
 
-    private fun handleRaw(ctx: CaptureCtx, img: Image) {
+    private fun handleRaw(ctx: CaptureCtx, frame: RawDeveloper.RawFrame) {
         ctx.receivedImages++
-        ctx.rawImage = img
+        ctx.rawFrame = frame
         maybeProcessRaw(ctx)
     }
 
     private fun maybeProcessRaw(ctx: CaptureCtx) {
-        val img = ctx.rawImage ?: return
+        val frame = ctx.rawFrame ?: return
         val result = ctx.result ?: return
         if (ctx.rawStarted) return
         ctx.rawStarted = true
@@ -551,19 +576,14 @@ class CameraController(context: Context, private val events: Events) {
             try {
                 if (req.saveDng) {
                     try {
-                        CaptureProcessor.saveDng(appContext, c, result, img, req)
+                        CaptureProcessor.saveDng(appContext, c, result, frame, req)
                     } catch (e: Throwable) {
                         Log.e(TAG, "dng", e)
                     }
                 }
-                if (req.developRaw) {
-                    val frame = RawDeveloper.copy(img)
-                    img.close()
-                    CaptureProcessor.developRaw(appContext, frame, c, result, req)
-                }
+                if (req.developRaw) CaptureProcessor.developRaw(appContext, frame, c, result, req)
             } finally {
-                runCatching { img.close() }
-                handler.post { ctx.rawImage = null; ctx.pendingJobs--; maybeRelease(ctx) }
+                handler.post { ctx.rawFrame = null; ctx.pendingJobs--; maybeRelease(ctx) }
             }
         }
     }
@@ -581,15 +601,15 @@ class CameraController(context: Context, private val events: Events) {
     private fun maybeRelease(ctx: CaptureCtx) {
         if (ctx.released) return
         if (!ctx.captureFinished || ctx.pendingJobs > 0 || ctx.receivedImages < ctx.expectedImages) return
-        if (ctx.rawImage != null && !ctx.rawStarted) return
+        if (ctx.rawFrame != null && !ctx.rawStarted) return
         ctx.released = true
         contexts.remove(ctx.id)
         if (ctx.timestamp >= 0) byTimestamp.remove(ctx.timestamp)
+        Log.d(TAG, "capture #${ctx.id} released")
         events.onBufferReleased()
     }
 
     private fun failOutstanding() {
-        pendingRaw.values.forEach { runCatching { it.close() } }
         pendingRaw.clear()
         pendingJpeg.clear()
         for (ctx in contexts.values.toList()) {
@@ -602,7 +622,7 @@ class CameraController(context: Context, private val events: Events) {
             }
             run {
                 ctx.released = true
-                ctx.rawImage?.let { if (!ctx.rawStarted) runCatching { it.close() } }
+                ctx.rawFrame = null
                 contexts.remove(ctx.id)
                 if (!ctx.captureFinished) events.onCaptureFailed() else events.onBufferReleased()
             }
@@ -612,5 +632,6 @@ class CameraController(context: Context, private val events: Events) {
 
     companion object {
         private const val TAG = "CameraController"
+        private const val CAPTURE_TIMEOUT_MS = 10_000L
     }
 }

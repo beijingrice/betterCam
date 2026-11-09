@@ -18,12 +18,8 @@
     <string name="prefer_auto">起動時にAUTOモードを優先</string>
     <string name="image_quality">画質</string>
     <string name="photo_resolution">写真の解像度</string>
-    <string name="resolution_note">24MP と 48MP は処理済みの写真に適用されます。RAW 形式はセンサーが対応する RAW 解像度を使用します。Android では Apple ProRAW は使用できず、DNG には RAW 対応カメラが必要です。</string>
+    <string name="resolution_note">解像度の選択肢はこの端末のカメラによって異なります。標準はセンサーの通常サイズ、高解像度は最大モード（対応時）を使用します。処理済みの写真に適用され、RAW 形式はセンサーの RAW 解像度を使用します。Android では Apple ProRAW は使用できず、DNG には RAW 対応カメラが必要です。</string>
     <string name="enable_zero_processing">加工なしモード</string>
-    <string name="buy_coffee_title">コーヒーを奢る</string>
-    <string name="buy_coffee_button">開発者にコーヒーを奢る！</string>
-    <string name="thank_you">ありがとうございます！</string>
-    <string name="already_donated">ありがとうございます！チップをいただきました。</string>
     <string name="ok">OK</string>
     <string name="cancel">キャンセル</string>
     <string name="done">完成</string>

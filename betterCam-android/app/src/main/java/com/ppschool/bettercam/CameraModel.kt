@@ -89,6 +89,11 @@ class CameraModel(app: Application) : AndroidViewModel(app), CameraController.Ev
         private set
     var is48MPSupported by mutableStateOf(false)
         private set
+    /** Real megapixel counts of this phone's standard / high-resolution modes (labels in the menu). */
+    var standardMP by mutableStateOf<Int?>(null)
+        private set
+    var highMP by mutableStateOf<Int?>(null)
+        private set
     var isRawSupported by mutableStateOf(false)
         private set
     val isProRAWSupported = false // Apple ProRAW has no Android equivalent.
@@ -100,8 +105,6 @@ class CameraModel(app: Application) : AndroidViewModel(app), CameraController.Ev
     var isShowingMenu by mutableStateOf(false)
         private set
     var inCameraView by mutableStateOf(true)
-        private set
-    var doneTheTip by mutableStateOf(prefs.getBoolean("doneTheTip", false))
         private set
     var hasCompletedTutorial by mutableStateOf(prefs.getBoolean("hasCompletedTutorial", false))
         private set
@@ -145,6 +148,8 @@ class CameraModel(app: Application) : AndroidViewModel(app), CameraController.Ev
         currentLens = LensDiscovery.defaultLens(lenses)
         currentLens?.let { updateUIWithLens(it) }
         bindRenderer()
+        // Keep the STYLE options in step with the LUT library (bundled LUTs load asynchronously).
+        viewModelScope.launch { snapshotFlow { FilmEngine.availableSimulations }.collect { pm.syncAllLUTsToOptions() } }
         if (hasCompletedTutorial) startCamera() else isShowingTutorial = true
     }
 
@@ -395,16 +400,14 @@ class CameraModel(app: Application) : AndroidViewModel(app), CameraController.Ev
         startCamera()
     }
 
-    fun markTipped() {
-        doneTheTip = true
-        prefs.edit().putBoolean("doneTheTip", true).apply()
-    }
-
     // ------------------------------------------------------------------ actions
 
     fun takePhoto() {
         val lens = currentLens ?: return
-        if (isSensorBusy || inFlightPhotos >= maxBufferCount || isShowingTutorial || !isFullyAuthorized) return
+        if (isSensorBusy || inFlightPhotos >= maxBufferCount || isShowingTutorial || !isFullyAuthorized) {
+            android.util.Log.d("CameraModel", "shutter ignored: busy=$isSensorBusy inFlight=$inFlightPhotos tutorial=$isShowingTutorial auth=$isFullyAuthorized")
+            return
+        }
         isSensorBusy = true
         inFlightPhotos += 1
         val manual = pm.isManualExposure
@@ -445,10 +448,12 @@ class CameraModel(app: Application) : AndroidViewModel(app), CameraController.Ev
     // ------------------------------------------------------------------ CameraController.Events (camera thread)
 
     override fun onCapabilities(caps: CameraController.Capabilities) = main.post {
-        is24MPSupported = caps.supports24MP
-        is48MPSupported = caps.supports48MP
+        standardMP = caps.standardMP
+        highMP = caps.highMP
+        is24MPSupported = caps.standardMP != null
+        is48MPSupported = caps.highMP != null
         isRawSupported = caps.supportsRaw
-        if (!caps.supports48MP && pm.photoResolutionMode == PhotoResolutionMode.HIGH_48MP) {
+        if (caps.highMP == null && pm.photoResolutionMode == PhotoResolutionMode.HIGH_48MP) {
             pm.photoResolutionMode = PhotoResolutionMode.STANDARD
         }
     }.let { }

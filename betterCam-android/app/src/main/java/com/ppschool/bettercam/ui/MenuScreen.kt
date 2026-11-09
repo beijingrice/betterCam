@@ -1,8 +1,6 @@
 package com.ppschool.bettercam.ui
 
-import android.app.Activity
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -17,27 +15,19 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -45,23 +35,16 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ppschool.bettercam.CameraModel
 import com.ppschool.bettercam.R
-import com.ppschool.bettercam.billing.StoreManager
 import com.ppschool.bettercam.camera.Haptics
 import com.ppschool.bettercam.data.ExposureMode
 import com.ppschool.bettercam.data.ImageQuality
 import com.ppschool.bettercam.data.PhotoResolutionMode
 import com.ppschool.bettercam.data.ShutterSoundMode
-import kotlinx.coroutines.launch
-
-private val Yellow = Color(0xFFFFD60A)
 
 /** MenuView.swift */
 @Composable
-fun MenuScreen(model: CameraModel, store: StoreManager) {
+fun MenuScreen(model: CameraModel) {
     val pm = model.pm
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    var showThanks by remember { mutableStateOf(false) }
     val enable = stringResource(R.string.enable)
     val disable = stringResource(R.string.disable)
     fun haptic() = model.haptics.impact(Haptics.Style.MEDIUM)
@@ -148,12 +131,12 @@ fun MenuScreen(model: CameraModel, store: StoreManager) {
             Section(stringResource(R.string.photo_resolution)) {
                 Segments {
                     SegmentedButton(
-                        if (model.is24MPSupported) PhotoResolutionMode.STANDARD.raw else "24MP N/A",
+                        model.standardMP?.let { "${it}MP" } ?: "STD N/A",
                         pm.photoResolutionMode == PhotoResolutionMode.STANDARD,
                         disabled = !model.is24MPSupported,
                     ) { haptic(); pm.photoResolutionMode = PhotoResolutionMode.STANDARD }
                     SegmentedButton(
-                        if (model.is48MPSupported) PhotoResolutionMode.HIGH_48MP.raw else "48MP N/A",
+                        model.highMP?.let { "${it}MP" } ?: "HIGH N/A",
                         pm.photoResolutionMode == PhotoResolutionMode.HIGH_48MP,
                         disabled = !model.is48MPSupported,
                     ) { haptic(); pm.photoResolutionMode = PhotoResolutionMode.HIGH_48MP }
@@ -170,47 +153,9 @@ fun MenuScreen(model: CameraModel, store: StoreManager) {
                 }
             }
 
-            if (!model.doneTheTip) {
-                Section(stringResource(R.string.buy_coffee_title)) {
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(Yellow.copy(alpha = 0.15f))
-                            .border(1.dp, Yellow.copy(alpha = 0.4f), RoundedCornerShape(10.dp))
-                            .clickable {
-                                model.haptics.impact(Haptics.Style.LIGHT)
-                                val activity = context as? Activity ?: return@clickable
-                                scope.launch {
-                                    if (store.purchase(activity)) {
-                                        model.haptics.impact(Haptics.Style.HEAVY)
-                                        model.markTipped()
-                                        showThanks = true
-                                    }
-                                }
-                            }
-                            .padding(16.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        if (store.isPurchasing) {
-                            CircularProgressIndicator(color = Yellow, strokeWidth = 2.dp, modifier = Modifier.size(18.dp))
-                        } else {
-                            Icon(painterResource(R.drawable.ic_cup), null, tint = Yellow, modifier = Modifier.size(20.dp))
-                        }
-                        Spacer(Modifier.width(8.dp))
-                        Text(
-                            stringResource(R.string.buy_coffee_button), color = Yellow, fontFamily = FontFamily.Monospace,
-                            fontWeight = FontWeight.Bold, fontSize = fixedSp(14.dp)
-                        )
-                    }
-                }
-            }
             Spacer(Modifier.height(8.dp))
         }
 
-        if (showThanks) {
-            InlineAlert(title = stringResource(R.string.thank_you), onDismiss = { showThanks = false })
-        }
     }
 }
 

@@ -17,22 +17,42 @@ import kotlin.math.min
  * bilinear demosaic, camera->sRGB matrix and a gentle tone curve. No sharpening, no NR.
  */
 object RawDeveloper {
-    private val pool = Executors.newFixedThreadPool(max(2, Runtime.getRuntime().availableProcessors() - 1))
+    private val pool = Executors.newFixedThreadPool(
+        max(2, Runtime.getRuntime().availableProcessors() / 2), BackgroundThreads.factory("bettercam.raw")
+    )
 
+    /** Tightly packed RAW16 pixels (row stride == width), detached from the camera's Image. */
     class RawFrame(
         val data: ShortArray,
         val width: Int,
         val height: Int,
-        val rowStride: Int, // in pixels
-    )
+    ) {
+        val rowStride: Int get() = width
+
+        /** Little-endian RAW16 bytes, the layout DngCreator.writeByteBuffer expects. */
+        fun toByteBuffer(): java.nio.ByteBuffer {
+            val buf = java.nio.ByteBuffer.allocateDirect(data.size * 2).order(java.nio.ByteOrder.nativeOrder())
+            buf.asShortBuffer().put(data)
+            return buf
+        }
+    }
 
     fun copy(image: Image): RawFrame {
         val plane = image.planes[0]
-        val buf = plane.buffer.asShortBuffer()
+        val w = image.width
+        val h = image.height
+        val src = plane.buffer.order(java.nio.ByteOrder.nativeOrder()).asShortBuffer()
         val stride = plane.rowStride / 2
-        val data = ShortArray(buf.remaining())
-        buf.get(data)
-        return RawFrame(data, image.width, image.height, stride)
+        val data = ShortArray(w * h)
+        if (stride == w) {
+            src.get(data, 0, w * h)
+        } else {
+            for (y in 0 until h) {
+                src.position(y * stride)
+                src.get(data, y * w, w)
+            }
+        }
+        return RawFrame(data, w, h)
     }
 
     fun develop(frame: RawFrame, chars: CameraCharacteristics, result: CaptureResult): Bitmap? {
@@ -60,6 +80,8 @@ object RawDeveloper {
             else { m[0] = 1f; m[4] = 1f; m[8] = 1f }
         }
         val shading = result.get(CaptureResult.STATISTICS_LENS_SHADING_CORRECTION_MAP)
+        // The ISP applies this digital gain after the RAW stage; include it so brightness matches the JPEG/AE target.
+        val boost = (result.get(CaptureResult.CONTROL_POST_RAW_SENSITIVITY_BOOST) ?: 100) / 100f
 
         // Super-pixel (half size) development keeps very large sensors manageable.
         val half = frame.width.toLong() * frame.height > 20_000_000L
@@ -70,42 +92,56 @@ object RawDeveloper {
         val w = frame.width
         val h = frame.height
         val lin = FloatArray(w * h)
+        val grid = shading?.let { ShadingGrid(it) }
         parallelRows(h) { y0, y1 ->
+            val rowGain = grid?.newRowBuffer()
+            val black = FloatArray(2)
+            val scale = FloatArray(2)
+            val wbIdx = IntArray(2)
             for (y in y0 until y1) {
-                val row = y * frame.rowStride
+                // Per-row constants for the two CFA columns (WB index in RGGB order: R, G_even, G_odd, B).
+                for (px in 0..1) {
+                    val pos = (y and 1) * 2 + px
+                    val idx = when (pattern[pos]) { 0 -> 0; 2 -> 3; else -> if (rowHasRed(pattern, y)) 1 else 2 }
+                    wbIdx[px] = idx
+                    black[px] = blackLevels[pos]
+                    scale[px] = wb[idx] * boost / (white - blackLevels[pos])
+                }
+                if (grid != null) grid.fillRow(y, h, rowGain!!)
+                val src = y * frame.rowStride
+                val dst = y * w
+                val data = frame.data
                 for (x in 0 until w) {
-                    val pos = (y and 1) * 2 + (x and 1)
-                    val raw = (frame.data[row + x].toInt() and 0xFFFF).toFloat()
-                    val black = blackLevels[pos]
-                    var v = (raw - black) / (white - black)
-                    // WB channel index in RGGB order: R, G_even, G_odd, B
-                    val ch = pattern[pos]
-                    val wbIdx = when (ch) { 0 -> 0; 2 -> 3; else -> if (rowHasRed(pattern, y)) 1 else 2 }
-                    if (shading != null) v *= shadingGain(shading, wbIdx, x, y, w, h)
-                    v *= wb[wbIdx]
-                    lin[y * w + x] = min(max(v, 0f), 1f)
+                    val p = x and 1
+                    var v = ((data[src + x].toInt() and 0xFFFF) - black[p]) * scale[p]
+                    if (grid != null) v *= grid.gain(rowGain!!, wbIdx[p], x, w)
+                    lin[dst + x] = if (v < 0f) 0f else if (v > 1f) 1f else v
                 }
             }
         }
 
         // 2) demosaic + matrix + tone.
         val bmp = Bitmap.createBitmap(outW, outH, Bitmap.Config.ARGB_8888)
-        val rgb = FloatArray(3)
+        val lut = toneLut
         parallelRows(outH) { y0, y1 ->
             val px = IntArray(outW)
             val c = FloatArray(3)
             for (y in y0 until y1) {
+                val interiorRow = !half && y > 0 && y < h - 1
                 for (x in 0 until outW) {
-                    if (half) superPixel(lin, w, pattern, x * 2, y * 2, c) else bilinear(lin, w, h, pattern, x, y, c)
+                    when {
+                        half -> superPixel(lin, w, pattern, x * 2, y * 2, c)
+                        interiorRow && x > 0 && x < w - 1 -> bilinearInterior(lin, w, pattern, x, y, c)
+                        else -> bilinear(lin, w, h, pattern, x, y, c)
+                    }
                     val r = ccm[0] * c[0] + ccm[1] * c[1] + ccm[2] * c[2]
                     val g = ccm[3] * c[0] + ccm[4] * c[1] + ccm[5] * c[2]
                     val b = ccm[6] * c[0] + ccm[7] * c[1] + ccm[8] * c[2]
-                    px[x] = (0xFF shl 24) or (tone(r) shl 16) or (tone(g) shl 8) or tone(b)
+                    px[x] = (0xFF shl 24) or (lut[toneIndex(r)] shl 16) or (lut[toneIndex(g)] shl 8) or lut[toneIndex(b)]
                 }
                 synchronized(bmp) { bmp.setPixels(px, 0, outW, 0, y, outW, 1) }
             }
         }
-        rgb.fill(0f)
         return bmp
     }
 
@@ -114,18 +150,36 @@ object RawDeveloper {
         return pattern[r] == 0 || pattern[r + 1] == 0
     }
 
-    private fun shadingGain(map: LensShadingMap, ch: Int, x: Int, y: Int, w: Int, h: Int): Float {
-        val fx = x.toFloat() / (w - 1) * (map.columnCount - 1)
-        val fy = y.toFloat() / (h - 1) * (map.rowCount - 1)
-        val x0 = fx.toInt().coerceIn(0, map.columnCount - 1)
-        val y0 = fy.toInt().coerceIn(0, map.rowCount - 1)
-        val x1 = min(x0 + 1, map.columnCount - 1)
-        val y1 = min(y0 + 1, map.rowCount - 1)
-        val tx = fx - x0
-        val ty = fy - y0
-        val a = map.getGainFactor(ch, x0, y0) + (map.getGainFactor(ch, x1, y0) - map.getGainFactor(ch, x0, y0)) * tx
-        val b = map.getGainFactor(ch, x0, y1) + (map.getGainFactor(ch, x1, y1) - map.getGainFactor(ch, x0, y1)) * tx
-        return a + (b - a) * ty
+    /** Lens shading gains copied once into flat arrays (LensShadingMap lookups are slow per pixel). */
+    private class ShadingGrid(map: LensShadingMap) {
+        val cols = map.columnCount
+        val rows = map.rowCount
+        private val g = Array(4) { ch -> FloatArray(cols * rows) { i -> map.getGainFactor(ch, i % cols, i / cols) } }
+
+        fun newRowBuffer() = Array(4) { FloatArray(cols) }
+
+        /** Interpolates the grid vertically for image row [y]. */
+        fun fillRow(y: Int, h: Int, out: Array<FloatArray>) {
+            val fy = y.toFloat() / (h - 1) * (rows - 1)
+            val y0 = fy.toInt().coerceIn(0, rows - 1)
+            val y1 = min(y0 + 1, rows - 1)
+            val t = fy - y0
+            for (ch in 0..3) {
+                val src = g[ch]; val dst = out[ch]
+                for (c in 0 until cols) {
+                    val a = src[y0 * cols + c]
+                    dst[c] = a + (src[y1 * cols + c] - a) * t
+                }
+            }
+        }
+
+        fun gain(row: Array<FloatArray>, ch: Int, x: Int, w: Int): Float {
+            val fx = x.toFloat() / (w - 1) * (cols - 1)
+            val x0 = fx.toInt().coerceIn(0, cols - 1)
+            val x1 = min(x0 + 1, cols - 1)
+            val r = row[ch]
+            return r[x0] + (r[x1] - r[x0]) * (fx - x0)
+        }
     }
 
     private fun superPixel(lin: FloatArray, w: Int, pattern: IntArray, x: Int, y: Int, out: FloatArray) {
@@ -136,32 +190,65 @@ object RawDeveloper {
         }
     }
 
-    private fun bilinear(lin: FloatArray, w: Int, h: Int, pattern: IntArray, x: Int, y: Int, out: FloatArray) {
-        fun at(xx: Int, yy: Int): Float {
-            val cx = if (xx < 0) 1 else if (xx >= w) w - 2 else xx
-            val cy = if (yy < 0) 1 else if (yy >= h) h - 2 else yy
-            return lin[cy * w + cx]
-        }
+    private fun bilinearInterior(lin: FloatArray, w: Int, pattern: IntArray, x: Int, y: Int, out: FloatArray) {
+        val i = y * w + x
+        val center = lin[i]
+        val left = lin[i - 1]; val right = lin[i + 1]
+        val up = lin[i - w]; val down = lin[i + w]
         val ch = pattern[(y and 1) * 2 + (x and 1)]
-        val center = lin[y * w + x]
-        val cross = (at(x - 1, y) + at(x + 1, y) + at(x, y - 1) + at(x, y + 1)) * 0.25f
-        val diag = (at(x - 1, y - 1) + at(x + 1, y - 1) + at(x - 1, y + 1) + at(x + 1, y + 1)) * 0.25f
         when (ch) {
-            0 -> { out[0] = center; out[1] = cross; out[2] = diag }
-            2 -> { out[2] = center; out[1] = cross; out[0] = diag }
+            0, 2 -> {
+                val cross = (left + right + up + down) * 0.25f
+                val diag = (lin[i - w - 1] + lin[i - w + 1] + lin[i + w - 1] + lin[i + w + 1]) * 0.25f
+                if (ch == 0) { out[0] = center; out[1] = cross; out[2] = diag } else { out[2] = center; out[1] = cross; out[0] = diag }
+            }
             else -> {
-                val horiz = (at(x - 1, y) + at(x + 1, y)) * 0.5f
-                val vert = (at(x, y - 1) + at(x, y + 1)) * 0.5f
-                val leftCh = pattern[(y and 1) * 2 + ((x + 1) and 1)]
+                val horiz = (left + right) * 0.5f
+                val vert = (up + down) * 0.5f
                 out[1] = center
-                if (leftCh == 0) { out[0] = horiz; out[2] = vert } else { out[2] = horiz; out[0] = vert }
+                if (pattern[(y and 1) * 2 + ((x + 1) and 1)] == 0) { out[0] = horiz; out[2] = vert } else { out[2] = horiz; out[0] = vert }
             }
         }
     }
 
+    private fun at(lin: FloatArray, w: Int, h: Int, xx: Int, yy: Int): Float {
+        val cx = if (xx < 0) 1 else if (xx >= w) w - 2 else xx
+        val cy = if (yy < 0) 1 else if (yy >= h) h - 2 else yy
+        return lin[cy * w + cx]
+    }
+
+    private fun bilinear(lin: FloatArray, w: Int, h: Int, pattern: IntArray, x: Int, y: Int, out: FloatArray) {
+        val ch = pattern[(y and 1) * 2 + (x and 1)]
+        val center = lin[y * w + x]
+        val cross = (at(lin, w, h, x - 1, y) + at(lin, w, h, x + 1, y) + at(lin, w, h, x, y - 1) + at(lin, w, h, x, y + 1)) * 0.25f
+        val diag = (at(lin, w, h, x - 1, y - 1) + at(lin, w, h, x + 1, y - 1) + at(lin, w, h, x - 1, y + 1) + at(lin, w, h, x + 1, y + 1)) * 0.25f
+        when (ch) {
+            0 -> { out[0] = center; out[1] = cross; out[2] = diag }
+            2 -> { out[2] = center; out[1] = cross; out[0] = diag }
+            else -> {
+                val horiz = (at(lin, w, h, x - 1, y) + at(lin, w, h, x + 1, y)) * 0.5f
+                val vert = (at(lin, w, h, x, y - 1) + at(lin, w, h, x, y + 1)) * 0.5f
+                out[1] = center
+                if (pattern[(y and 1) * 2 + ((x + 1) and 1)] == 0) { out[0] = horiz; out[2] = vert } else { out[2] = horiz; out[0] = vert }
+            }
+        }
+    }
+
+    private const val TONE_STEPS = 4096
+    /** tone() baked into a table over linear 0..1 (inputs above 1 clip to white). */
+    private val toneLut = IntArray(TONE_STEPS + 1) { tone(it / TONE_STEPS.toFloat()) }
+
+    private fun toneIndex(v: Float): Int = if (v <= 0f) 0 else if (v >= 1f) TONE_STEPS else (v * TONE_STEPS + 0.5f).toInt()
+
+    /**
+     * Default "camera" tone curve: +~0.5 EV for mid-grey with a soft shoulder that keeps white at 1.0
+     * (similar to the baseline curve Apple's RAW engine applies), then sRGB and a light S-curve.
+     */
     private fun tone(linear: Float): Int {
-        var v = ColorMath.linearToSrgb(linear)
-        v += (v * v * (3f - 2f * v) - v) * 0.25f
+        val x = linear.coerceAtLeast(0f)
+        val lifted = x * 1.6f / (1f + 0.6f * x)
+        var v = ColorMath.linearToSrgb(lifted)
+        v += (v * v * (3f - 2f * v) - v) * 0.15f
         return (v * 255f + 0.5f).toInt().coerceIn(0, 255)
     }
 

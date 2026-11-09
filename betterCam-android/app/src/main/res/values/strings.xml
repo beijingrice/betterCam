@@ -19,12 +19,8 @@
     <string name="prefer_auto">Prefer AUTO mode when launched</string>
     <string name="image_quality">Image Quality</string>
     <string name="photo_resolution">Photo Resolution</string>
-    <string name="resolution_note">24MP and 48MP apply to processed photos. RAW formats use a sensor-supported RAW resolution. Apple ProRAW is not available on Android; DNG needs a RAW-capable camera.</string>
+    <string name="resolution_note">Resolution options depend on this phone\'s camera: standard is the sensor\'s normal size, high uses its largest mode if it has one. They apply to processed photos; RAW formats use the sensor\'s RAW resolution. Apple ProRAW is not available on Android; DNG needs a RAW-capable camera.</string>
     <string name="enable_zero_processing">Enable ZERO PROCESSING</string>
-    <string name="buy_coffee_title">Buy me a cup of coffee</string>
-    <string name="buy_coffee_button">Buy me a cup of coffee!</string>
-    <string name="thank_you">Thank you!</string>
-    <string name="already_donated">Oh, yeah! You have already donated me! Thank you!</string>
     <string name="ok">OK</string>
     <string name="cancel">Cancel</string>
     <string name="done">Done</string>

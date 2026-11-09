@@ -8,7 +8,6 @@ import android.graphics.ColorSpace
 import android.hardware.camera2.CameraCharacteristics
 import android.hardware.camera2.CaptureResult
 import android.hardware.camera2.DngCreator
-import android.media.Image
 import android.net.Uri
 import android.os.Build
 import android.provider.MediaStore
@@ -141,11 +140,14 @@ object CaptureProcessor {
 
     // ------------------------------------------------------------- RAW path
 
-    fun saveDng(context: Context, chars: CameraCharacteristics, result: CaptureResult, image: Image, req: PhotoCaptureRequest) {
+    fun saveDng(context: Context, chars: CameraCharacteristics, result: CaptureResult, frame: RawDeveloper.RawFrame, req: PhotoCaptureRequest) {
         try {
             val creator = DngCreator(chars, result)
             creator.setOrientation(req.exifOrientation)
-            insert(context, baseName() + ".dng", "image/x-adobe-dng") { creator.writeImage(it, image) }
+            val pixels = frame.toByteBuffer()
+            insert(context, baseName() + ".dng", "image/x-adobe-dng") {
+                creator.writeByteBuffer(it, android.util.Size(frame.width, frame.height), pixels, 0)
+            }
             creator.close()
         } catch (e: Throwable) {
             Log.e(TAG, "DNG save failed", e)
@@ -157,10 +159,14 @@ object CaptureProcessor {
         result: CaptureResult, req: PhotoCaptureRequest,
     ) {
         try {
+            val t0 = System.nanoTime()
             val bmp = RawDeveloper.develop(frame, chars, result) ?: return
+            val t1 = System.nanoTime()
             FilmEngine.processBitmap(bmp, FilmEngine.plan(req.styleName, req.lutIntensity, req.grainIntensity))
+            val t2 = System.nanoTime()
             val out = File(context.cacheDir, "raw_${System.nanoTime()}.jpg")
             out.outputStream().use { bmp.compress(Bitmap.CompressFormat.JPEG, 95, it) }
+            Log.d(TAG, "RAW develop ${(t1 - t0) / 1_000_000} ms, film ${(t2 - t1) / 1_000_000} ms, encode ${(System.nanoTime() - t2) / 1_000_000} ms")
             bmp.recycle()
             val exif = ExifInterface(out)
             exif.setAttribute(ExifInterface.TAG_ORIENTATION, req.exifOrientation.toString())

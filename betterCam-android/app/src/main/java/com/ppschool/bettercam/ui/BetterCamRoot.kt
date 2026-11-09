@@ -1,5 +1,6 @@
 package com.ppschool.bettercam.ui
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
@@ -29,7 +30,6 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import com.ppschool.bettercam.CameraModel
-import com.ppschool.bettercam.billing.StoreManager
 import kotlin.math.max
 import kotlin.math.min
 
@@ -37,11 +37,15 @@ private enum class Page { CAMERA, MENU, LUTS }
 
 /** ContentView.swift */
 @Composable
-fun BetterCamRoot(model: CameraModel, store: StoreManager) {
+fun BetterCamRoot(model: CameraModel) {
     val page = when {
         model.isShowingMenu -> Page.MENU
         !model.inCameraView -> Page.LUTS
         else -> Page.CAMERA
+    }
+    // Android Back closes the menu / LUT manager instead of leaving the app.
+    BackHandler(enabled = page != Page.CAMERA) {
+        if (page == Page.MENU) model.showMenu(false) else model.showCameraView(true)
     }
     Box(Modifier.fillMaxSize().background(Color.Black)) {
         AnimatedVisibility(page == Page.CAMERA, enter = fadeIn(tween(240)), exit = fadeOut(tween(240))) {
@@ -58,7 +62,7 @@ fun BetterCamRoot(model: CameraModel, store: StoreManager) {
                 label = "page",
             ) { p ->
                 when (p) {
-                    Page.MENU -> MenuScreen(model, store)
+                    Page.MENU -> MenuScreen(model)
                     Page.LUTS -> LutManagerScreen(model)
                     Page.CAMERA -> CameraBody(model, size, turns)
                 }
