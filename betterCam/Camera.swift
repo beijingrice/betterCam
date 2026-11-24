@@ -5,16 +5,15 @@ import Combine
 import UIKit
 
 class Camera: NSObject, ObservableObject {
-    // MARK: - 核心模块注入 (所有打工仔)
-    @Published var parameterManager = ParameterManager()
+    // MARK: - 相机模块
     @Published var lensManager = LensManager()
+    @Published var parameterManager = ParameterManager()
     var sessionManager = SessionManager()
     var shutterSoundManager = ShutterSoundManager()
     var permissionManager = PermissionManager()
     var motionManager = MotionManager() // 💡 新加入的陀螺仪管家
     
-    @Published var currentPreviewImage: CGImage?
-    
+    private var hasConfiguredSession = false
     private var cancellables = Set<AnyCancellable>()
     
     // MARK: - UI 交互状态
@@ -22,26 +21,29 @@ class Camera: NSObject, ObservableObject {
     @Published var isAdjustingValue: Bool = false
     @Published var exposureIndicatorMode: ExposureMode = .off {
         didSet {
-            MetalWHProcessor.shared.exposureIndicatorMode = self.exposureIndicatorMode
-            DispatchQueue.main.async {
-                if self.exposureIndicatorMode == .waveform {
-                    MetalWHProcessor.shared.histogramImage = nil
-                } else if self.exposureIndicatorMode == .histogram {
-                    MetalWHProcessor.shared.waveformImage = nil
-                } else {
-                    MetalWHProcessor.shared.waveformImage = nil
-                    MetalWHProcessor.shared.histogramImage = nil
-                }
-            }
+            MetalWHProcessor.shared.setMode(exposureIndicatorMode)
         }
     }
     // Camera App Status
     
-    // @Published var isCapturing: Bool = false
-    // CHANGE TO ->
     @Published var isSensorBusy: Bool = false
     @Published var inFlightPhotos: Int = 0
-    let maxBufferCount: Int = 3
+    @Published var is24MPSupported: Bool = false
+    @Published var is48MPSupported: Bool = false
+    @Published var isProRAWSupported: Bool = false
+    @Published var lastCaptureResolution: String?
+    var availableImageQualityOptions: [String] {
+        parameterManager.imageQualityOptions.filter {
+            $0 != "ProRAW" || isProRAWSupported
+        }
+    }
+    var isManualExposureActive: Bool {
+        parameterManager.SS != ExposureParameter.auto &&
+        parameterManager.ISO != ExposureParameter.auto
+    }
+    var maxBufferCount: Int {
+        parameterManager.photoResolutionMode == .high48MP ? 1 : 3
+    }
     @Published var isShowingMenu = false { didSet { manageSession() } }
     @Published var inCameraView: Bool = true { didSet { manageSession() } }
     @AppStorage("doneTheTip") var doneTheTip: Bool = false
@@ -62,35 +64,50 @@ class Camera: NSObject, ObservableObject {
         sessionManager.delegate = self // pass camera instance to sessionManager
         
         if hasCompletedTutorial {
-            callAllStartupFuncs()
+            startCamera()
         } else {
             isShowingTutorial = true
         }
     }
     
-    func callAllStartupFuncs() {
-        permissionManager.checkAllPermissions()
+    func startCamera() {
         motionManager.start()
-        lensManager.discoverCameras(enableFrontCamera: parameterManager.enableFrontCamera)
         shutterSoundManager.setupSound(named: parameterManager.shutterSoundSelection.rawValue)
         
-        // 1. 启动硬件
-        sessionManager.initSession(with: lensManager.currentLens)
-        
-        // 2. 初始化第一颗镜头的物理参数到 UI
-        updateUIWithLens(lensManager.currentLens)
-        
-        // 3. 建立绑定机制
-        setupBindings()
+        if let lens = lensManager.currentLens {
+            configureInitialLens(lens)
+        }
+
+        bindLensSelection()
+        bindExposureControls()
+        bindCaptureSettings()
+        bindFilmLook()
+        bindFocusAndSound()
     }
     
-    private func setupBindings() {
+    private func configureInitialLens(_ lens: Lens) {
+        permissionManager.checkAllPermissions()
+        hasConfiguredSession = true
+        sessionManager.initSession(with: lens)
+        updateUIWithLens(lens)
+    }
+
+    private func bindLensSelection() {
         // 💡 监听镜头切换 -> 换硬件输入 + 自动刷新光圈/焦距
         lensManager.$currentLens
-            .dropFirst() // 忽略 App 启动时的第一次通知，因为 callAllStartupFuncs 已处理
+            .dropFirst() // 忽略 App 启动时的第一次通知，因为 startCamera 已处理
             .debounce(for: .seconds(0.2), scheduler: DispatchQueue.main) // 💡 核心防抖：用户停下轮子 0.3 秒后才放行！
             .sink { [weak self] newLens in
-                guard let self = self else { return }
+                guard let self, let newLens else { return }
+
+                if !self.hasConfiguredSession {
+                    self.configureInitialLens(newLens)
+                    return
+                }
+                if self.sessionManager.isUsingDevice(newLens.device) {
+                    self.updateUIWithLens(newLens)
+                    return
+                }
                 
                 // 1. 瞬间开启模糊过场
                 withAnimation(.easeInOut(duration: 0.3)) {
@@ -99,6 +116,7 @@ class Camera: NSObject, ObservableObject {
                 
                 // 2. 真正执行重负荷的底层硬件切换
                 self.sessionManager.switchInput(to: newLens.device)
+                self.updatePreviewHDR()
                 self.updateUIWithLens(newLens)
                 
                 // 3. 硬件准备好后，撤销模糊
@@ -110,15 +128,151 @@ class Camera: NSObject, ObservableObject {
             }
             .store(in: &cancellables)
             
-        // 💡 监听参数拨盘 (SS / ISO / EV) 触发更新曝光
-        Publishers.CombineLatest3(parameterManager.$SS, parameterManager.$ISO, parameterManager.$EV)
+    }
+
+    private func bindExposureControls() {
+        // 监听参数拨盘 (SS / ISO) 触发更新曝光
+        Publishers.CombineLatest(parameterManager.$SS, parameterManager.$ISO)
             .debounce(for: .milliseconds(50), scheduler: DispatchQueue.main)
-            .sink { [weak self] _, _, _ in self?.sessionManager.updateExposure() }
+            .sink { [weak self] _, _ in
+                guard let self, self.lensManager.currentLens != nil else { return }
+                self.sessionManager.updateExposure()
+                self.updatePreviewHDR()
+            }
+            .store(in: &cancellables)
+        
+        // 💡 手动模式下 EV 是测光显示，不反向触发硬件曝光更新
+        parameterManager.$EV
+            .dropFirst()
+            .removeDuplicates()
+            .debounce(for: .milliseconds(120), scheduler: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self = self else { return }
+                if self.parameterManager.SS == ExposureParameter.auto || self.parameterManager.ISO == ExposureParameter.auto {
+                    self.sessionManager.updateExposure()
+                }
+            }
             .store(in: &cancellables)
             
+    }
+
+    private func bindCaptureSettings() {
+        // Keep the photo output prepared for whatever the next shot will be. Debounced so a
+        // chain of corrections (e.g. 48MP forcing JPEG) prepares only the final state.
+        Publishers.CombineLatest4(
+            parameterManager.$imageQuality,
+            parameterManager.$photoResolutionMode,
+            parameterManager.$isPureRawEngineEnabled,
+            Publishers.CombineLatest(parameterManager.$SS, parameterManager.$ISO)
+        )
+        .debounce(for: .milliseconds(150), scheduler: DispatchQueue.main)
+        .sink { [weak self] quality, resolution, pureRaw, exposure in
+            self?.sessionManager.preparePhotoPipeline(
+                resolutionMode: resolution,
+                imageQuality: quality,
+                usePureRawEngine: pureRaw,
+                usesManualExposure: exposure.0 != ExposureParameter.auto && exposure.1 != ExposureParameter.auto
+            )
+        }
+        .store(in: &cancellables)
+
+        parameterManager.$imageQuality
+            .sink { [weak self] q in
+                guard let self = self else { return }
+
+                if q == "ProRAW" && !self.isProRAWSupported {
+                    self.parameterManager.imageQuality = "JPEG"
+                    return
+                }
+
+                self.updatePreviewHDR(quality: q)
+
+                if self.parameterManager.photoResolutionMode == .high48MP,
+                   q != "JPEG" && q != "ProRAW" {
+                    self.parameterManager.photoResolutionMode = .standard
+                }
+            }
+            .store(in: &cancellables)
+
+        parameterManager.$photoResolutionMode
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] mode in
+                guard let self = self else { return }
+
+                if mode == .high48MP {
+                    guard self.is48MPSupported else {
+                        self.parameterManager.photoResolutionMode = .standard
+                        return
+                    }
+
+                    self.parameterManager.isPureRawEngineEnabled = false
+                    if self.parameterManager.imageQuality != "JPEG" &&
+                        self.parameterManager.imageQuality != "ProRAW" {
+                        self.parameterManager.imageQuality = "JPEG"
+                    }
+                }
+
+            }
+            .store(in: &cancellables)
+
+        parameterManager.$isPureRawEngineEnabled
+            .dropFirst()
+            .removeDuplicates()
+            .sink { [weak self] enabled in
+                guard let self = self else { return }
+
+                if enabled && self.parameterManager.photoResolutionMode == .high48MP {
+                    self.parameterManager.photoResolutionMode = .standard
+                }
+
+                // Apple ProRAW includes Apple's computational pipeline, so it cannot
+                // represent the app's Bayer RAW zero-processing path.
+                if enabled && self.parameterManager.imageQuality == "ProRAW" {
+                    self.parameterManager.imageQuality = "DNG+J"
+                }
+
+                self.updatePreviewHDR(usesRAWDeveloper: enabled)
+            }
+            .store(in: &cancellables)
+            
+    }
+
+    private func updatePreviewHDR(quality: String? = nil, usesRAWDeveloper: Bool? = nil) {
+        guard let device = lensManager.currentLens?.device else { return }
+        let enablesHDR = !isManualExposureActive &&
+            !(usesRAWDeveloper ?? parameterManager.isPureRawEngineEnabled) &&
+            ParameterManager.savesJPEG(quality: quality ?? parameterManager.imageQuality)
+        sessionManager.HDRswitch(enablesHDR, device: device)
+    }
+
+    private func bindFilmLook() {
+        let engine = FilmEngine.shared
+        let controls = Publishers.CombineLatest4(
+            parameterManager.$style, parameterManager.$imageQuality, $lutIntensity, $grainIntensity
+        )
+        Publishers.CombineLatest(controls, engine.$availableSimulations)
+            .sink { [weak self] update in
+                let ((style, quality, color, grain), simulations) = update
+                self?.sessionManager.previewFrames.update(look: FilmRenderSettings(
+                    style: simulations.first(where: { $0.name == style }),
+                    colorAmount: color, grainAmount: grain,
+                    appliesLook: ParameterManager.savesJPEG(quality: quality)
+                ))
+            }
+            .store(in: &cancellables)
+    }
+
+    var canAdjustFilmLook: Bool {
+        ParameterManager.savesJPEG(quality: parameterManager.imageQuality) &&
+        parameterManager.style != FilmEngine.standardName &&
+        parameterManager.style != FilmEngine.manageName
+    }
+
+    private func bindFocusAndSound() {
         parameterManager.$AFMode
             .sink { [weak self] mode in
-                guard let dev = self?.lensManager.currentLens.device else { return }
+                guard let dev = self?.lensManager.currentLens?.device else { return }
                 self?.sessionManager.focusModify(mode: mode == "AF-S" ? .locked : .continuousAutoFocus, device: dev)
             }
             .store(in: &cancellables)
@@ -129,26 +283,23 @@ class Camera: NSObject, ObservableObject {
                 self?.parameterManager.saveExposureParameters()
             }
             .store(in: &cancellables)
-        
-        parameterManager.$isPureRawEngineEnabled
-            .syncChange(on: self) { [weak self] isPureRawEngineEnabled in
-                guard let self = self else { return }
-                self.sessionManager.HDRswitch(isPureRawEngineEnabled, device: self.lensManager.currentLens.device)
-            }
     }
     
     func refreshLensCapabilities() {
-        // 1. 让当前镜头自我刷新（去读 6400 的极限）
-        lensManager.currentLens.refreshCapabilities()
-        
-        // 2. 🚨 极其重要：把刷新后的新镜头塞回 LensManager 的数组里替换掉旧的！
-        // 否则你切一次镜头再切回来，它又会变成 4000
-        if let index = lensManager.physicalLenses.firstIndex(where: { $0.device.uniqueID == lensManager.currentLens.device.uniqueID }) {
-            lensManager.physicalLenses[index] = lensManager.currentLens
+        if !Thread.isMainThread {
+            DispatchQueue.main.async { [weak self] in
+                self?.refreshLensCapabilities()
+            }
+            return
         }
         
-        // 3. 把最新鲜的数据推给 UI
-        updateUIWithLens(lensManager.currentLens)
+        guard var lens = lensManager.currentLens else { return }
+        lens.refreshCapabilities()
+        lensManager.currentLens = lens
+        if let index = lensManager.physicalLenses.firstIndex(where: { $0.device.uniqueID == lens.device.uniqueID }) {
+            lensManager.physicalLenses[index] = lens
+        }
+        updateUIWithLens(lens)
     }
     
     // 💡 一个辅助函数，把镜头的物理属性传递给参数管家
@@ -157,24 +308,52 @@ class Camera: NSObject, ObservableObject {
         parameterManager.actualISOoptions = lens.availableISOoptions
         parameterManager.Aperture = lens.aperture
         parameterManager.currentFocalLength = lens.equivalentFocalLength
+        parameterManager.validateExposureOptions()
     }
     
     // MARK: - 交互操作
     func takePhoto() {
-        guard !isSensorBusy && inFlightPhotos < maxBufferCount && !isShowingTutorial else { return }
+        guard let lens = lensManager.currentLens, !isSensorBusy && inFlightPhotos < maxBufferCount && !isShowingTutorial else { return }
         isSensorBusy = true
         inFlightPhotos += 1
+
+        let manualDuration = isManualExposureActive
+            ? ExposureParameter.clampedDuration(
+                ExposureParameter.shutterDuration(parameterManager.SS) ?? lens.device.exposureDuration,
+                for: lens
+            )
+            : nil
+        let manualISO = isManualExposureActive
+            ? ExposureParameter.clampedISO(
+                ExposureParameter.isoValue(parameterManager.ISO) ?? lens.minISO,
+                for: lens
+            )
+            : nil
         
-        sessionManager.capturePhoto(orientation: motionManager.deviceOrientation, userSettings: (
-            parameterManager.imageQuality,
-            lensManager.currentLens.device.position == .front // check if using front cam
-        ))
+        let request = PhotoCaptureRequest(
+            imageQuality: parameterManager.imageQuality,
+            resolutionMode: parameterManager.photoResolutionMode,
+            isFrontCamera: lens.device.position == .front,
+            usePureRawEngine: parameterManager.isPureRawEngineEnabled,
+            look: FilmEngine.shared.settings(
+                styleName: parameterManager.style, colorAmount: lutIntensity, grainAmount: grainIntensity,
+                appliesLook: ParameterManager.savesJPEG(quality: parameterManager.imageQuality)
+            ),
+            usesManualExposure: isManualExposureActive,
+            manualExposureDuration: manualDuration,
+            manualISO: manualISO
+        )
+        sessionManager.capturePhoto(
+            orientation: motionManager.deviceOrientation,
+            request: request
+        )
         shutterSoundManager.play()
         UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
     }
     
     func focus(at point: CGPoint) {
-        sessionManager.focus(at: point, afMode: parameterManager.AFMode, device: lensManager.currentLens.device)
+        guard let device = lensManager.currentLens?.device else { return }
+        sessionManager.focus(at: point, afMode: parameterManager.AFMode, device: device)
     }
     
     func toggleAdjustmentMode() {
@@ -191,6 +370,7 @@ class Camera: NSObject, ObservableObject {
     }
     
     func manageSession() {
+        guard lensManager.currentLens != nil else { return }
         if !inCameraView || isShowingMenu { sessionManager.stop() }
         else { sessionManager.start() }
     }

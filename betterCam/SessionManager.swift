@@ -10,22 +10,54 @@ import AVFoundation
 import Combine
 import CoreImage
 import Photos
+internal import UniformTypeIdentifiers
+
+private struct CaptureContext {
+    let request: PhotoCaptureRequest
+    var pendingProcessingJobs: Int = 0
+    var captureFinished: Bool = false
+    // Held until the capture is complete so RAW+JPEG land in the library as one asset.
+    var photoData: Data?
+    var rawData: Data?
+    /// Metered brightness of the viewfinder frame when the shutter fired, in stops.
+    var previewStops: Float?
+}
 
 class SessionManager: NSObject {
     let session = AVCaptureSession()
     private let photoOutput = AVCapturePhotoOutput()
     private let videoDataOutput = AVCaptureVideoDataOutput()
-    private let context = CIContext()
+    private let context = CIContext(options: [.workingColorSpace: FilmEngine.workingColorSpace])
+    let previewFrames = CameraPreviewFrames()
     
     weak var delegate: Camera?
     
     
-    private let processingQueue = DispatchQueue(label: "com.bettercam.processingQueue", attributes: .concurrent)
+    // Full-resolution Core Image rendering can materialize several large buffers.
+    // Keep still-photo development serial to avoid multiple 48 MP renders competing for memory.
+    private let processingQueue = DispatchQueue(label: "com.bettercam.processingQueue")
     private let sessionQueue = DispatchQueue(label: "com.bettercam.sessionQueue")
-    private var exposureOffsetObserver: NSKeyValueObservation?
-    private var smoothedOffset: Float = 0.0
-    private var lastUpdateTimestamp: TimeInterval = 0
-    private var physicalStreamingPosition: AVCaptureDevice.Position = .back
+    private let captureContextLock = NSLock()
+    private var captureContexts: [Int64: CaptureContext] = [:]
+    private var photoDimensions = PhotoDimensions()
+    // Manual-exposure meter state, shared between the main and video queues.
+    nonisolated private let meterLock = NSLock()
+    nonisolated(unsafe) private var meterIsActive = false
+    nonisolated(unsafe) private var hasMeterReading = false
+    nonisolated(unsafe) private var smoothedOffset: Float = 0.0
+    nonisolated(unsafe) private var lastMeterSampleTimestamp: TimeInterval = 0
+    nonisolated(unsafe) private var lastUpdateTimestamp: TimeInterval = 0
+    nonisolated(unsafe) private var lastMeterDisplayValue: Float?
+    /// Latest viewfinder reading, kept even when the meter is hidden: a ZERO PROCESSING
+    /// capture develops its RAW to this brightness.
+    nonisolated(unsafe) private var latestFrameStops: Float?
+    nonisolated(unsafe) private var latestFrameTimestamp: TimeInterval = 0
+    nonisolated private let meterSampleInterval: TimeInterval = 1.0 / 15
+    nonisolated private let meterUpdateInterval: TimeInterval = 0.12
+    nonisolated private let meterSmoothing: Float = 0.6
+    nonisolated private let meterZeroDeadband: Float = 0.12
+    nonisolated private let meterDisplayDeadband: Float = 0.1
+    private var activeDeviceUniqueID: String?
     
     func initSession(with lens: Lens) {
         sessionQueue.async { [weak self] in
@@ -36,6 +68,7 @@ class SessionManager: NSObject {
             
             if self.session.canAddOutput(self.videoDataOutput) {
                 self.session.addOutput(self.videoDataOutput)
+                self.videoDataOutput.alwaysDiscardsLateVideoFrames = true
                 self.videoDataOutput.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
                 self.videoDataOutput.setSampleBufferDelegate(self, queue: DispatchQueue(label: "videoQueue"))
             }
@@ -47,10 +80,15 @@ class SessionManager: NSObject {
                 let input = try AVCaptureDeviceInput(device: lens.device)
                 if self.session.canAddInput(input) { self.session.addInput(input) }
             } catch { print("Init input failed!") }
+
+            self.configurePhotoOutput(for: lens.device)
             
             self.session.commitConfiguration()
-            self.physicalStreamingPosition = lens.device.position
+            self.activeDeviceUniqueID = lens.device.uniqueID
+            self.delegate?.refreshLensCapabilities() 
             self.session.startRunning()
+            self.applyPreparedPhotoSettings()
+            self.warmUpStillProcessing()
             self.setupLightMeter(for: lens.device)
             
             
@@ -72,8 +110,180 @@ class SessionManager: NSObject {
             } catch {
                 print("Switch input failed!")
             }
+            self.configurePhotoOutput(for: device)
             self.session.commitConfiguration()
-            self.physicalStreamingPosition = device.position
+            self.applyPreparedPhotoSettings()
+            self.activeDeviceUniqueID = device.uniqueID
+            self.delegate?.refreshLensCapabilities()
+            self.setupLightMeter(for: device)
+        }
+    }
+    
+    func isUsingDevice(_ device: AVCaptureDevice) -> Bool {
+        return activeDeviceUniqueID == device.uniqueID
+    }
+
+    private func configurePhotoOutput(for device: AVCaptureDevice) {
+        photoOutput.maxPhotoQualityPrioritization = .quality
+
+        let supportsAppleProRAW = photoOutput.isAppleProRAWSupported
+        if supportsAppleProRAW {
+            photoOutput.isAppleProRAWEnabled = true
+        } else if photoOutput.isAppleProRAWEnabled {
+            photoOutput.isAppleProRAWEnabled = false
+        }
+
+        photoDimensions = PhotoDimensions(supported: device.activeFormat.supportedMaxPhotoDimensions)
+        if let largest = photoDimensions.largest {
+            photoOutput.maxPhotoDimensions = largest
+        }
+
+        let supports24MP = photoDimensions.medium != nil
+        let supports48MP = photoDimensions.high != nil
+        DispatchQueue.main.async { [weak self] in
+            guard let camera = self?.delegate else { return }
+            camera.is24MPSupported = supports24MP
+            camera.is48MPSupported = supports48MP
+            camera.isProRAWSupported = supportsAppleProRAW
+
+            if !supportsAppleProRAW && camera.parameterManager.imageQuality == "ProRAW" {
+                camera.parameterManager.imageQuality = "JPEG"
+            }
+
+            if !supports48MP && camera.parameterManager.photoResolutionMode == .high48MP {
+                camera.parameterManager.photoResolutionMode = .standard
+            }
+        }
+    }
+
+    // The processed photo is only an intermediate: it is decoded, styled and re-encoded
+    // as JPEG. Ask for near-lossless HEVC so the second encode is the only real loss.
+    private static let intermediateFormat: [String: Any] = [
+        AVVideoCodecKey: AVVideoCodecType.hevc,
+        AVVideoCompressionPropertiesKey: [AVVideoQualityKey: 1.0]
+    ]
+    private static let jpegQuality = 0.95
+
+    private func makePhotoSettings(for request: PhotoCaptureRequest) -> AVCapturePhotoSettings? {
+        let rawTypes = photoOutput.availableRawPhotoPixelFormatTypes
+        let bayerRAW = rawTypes.first {
+            AVCapturePhotoOutput.isBayerRAWPixelFormat($0)
+        }
+        let appleProRAW = rawTypes.first {
+            AVCapturePhotoOutput.isAppleProRAWPixelFormat($0)
+        }
+
+        let settings: AVCapturePhotoSettings
+        if request.imageQuality == "ProRAW" {
+            guard let appleProRAW else { return nil }
+            settings = AVCapturePhotoSettings(rawPixelFormatType: appleProRAW)
+        } else if request.usePureRawEngine && request.imageQuality != "DNG" {
+            guard let bayerRAW else { return nil }
+            settings = AVCapturePhotoSettings(rawPixelFormatType: bayerRAW)
+        } else if request.imageQuality == "DNG+J" {
+            guard let bayerRAW else { return nil }
+            settings = AVCapturePhotoSettings(
+                rawPixelFormatType: bayerRAW,
+                processedFormat: Self.intermediateFormat
+            )
+        } else if request.imageQuality == "DNG" {
+            guard let bayerRAW else { return nil }
+            settings = AVCapturePhotoSettings(rawPixelFormatType: bayerRAW)
+        } else {
+            settings = AVCapturePhotoSettings(format: Self.intermediateFormat)
+        }
+
+        let canRequest48MP = request.resolutionMode == .high48MP &&
+            !request.usePureRawEngine &&
+            (request.imageQuality == "JPEG" || request.imageQuality == "ProRAW")
+
+        if canRequest48MP, let dimensions = photoDimensions.high {
+            settings.maxPhotoDimensions = dimensions
+        } else if request.imageQuality == "ProRAW" ||
+                    request.imageQuality == "DNG" ||
+                    request.imageQuality == "DNG+J" ||
+                    request.usePureRawEngine,
+                  let dimensions = photoDimensions.nativeRAW {
+            // Bayer RAW and standard ProRAW use the sensor's native binned RAW size.
+            settings.maxPhotoDimensions = dimensions
+        } else if let dimensions = photoDimensions.medium ?? photoDimensions.nativeRAW {
+            settings.maxPhotoDimensions = dimensions
+        }
+
+        if request.usesManualExposure ||
+            AVCapturePhotoOutput.isBayerRAWPixelFormat(settings.rawPhotoPixelFormatType) {
+            // Apple requires .speed to honor custom exposure duration and ISO.
+            settings.photoQualityPrioritization = .speed
+        } else {
+            // Auto exposure with an ISP-processed photo (JPEG at any resolution, ProRAW):
+            // allow multi-frame fusion. Bursts are already bounded by the in-flight limit.
+            settings.photoQualityPrioritization = .quality
+        }
+
+        return settings
+    }
+
+    // Allocating capture buffers for a new kind of request stalls the session, which
+    // showed up as a hitch on the first shot (worst for Bayer RAW). Preparing the current
+    // configuration ahead of time moves that cost off the shutter. Prepared settings are
+    // dropped whenever the session is reconfigured, so they are re-applied after a lens
+    // switch as well.
+    private var preparedRequest: PhotoCaptureRequest?
+
+    func preparePhotoPipeline(
+        resolutionMode: PhotoResolutionMode,
+        imageQuality: String,
+        usePureRawEngine: Bool,
+        usesManualExposure: Bool
+    ) {
+        let request = PhotoCaptureRequest(
+            imageQuality: imageQuality,
+            resolutionMode: resolutionMode,
+            isFrontCamera: false,
+            usePureRawEngine: usePureRawEngine,
+            look: .standard,
+            usesManualExposure: usesManualExposure,
+            manualExposureDuration: nil,
+            manualISO: nil
+        )
+        sessionQueue.async { [weak self] in
+            self?.preparedRequest = request
+            self?.applyPreparedPhotoSettings()
+        }
+    }
+
+    // Session queue only.
+    private func applyPreparedPhotoSettings() {
+        guard let request = preparedRequest, photoOutput.connection(with: .video) != nil,
+              let settings = makePhotoSettings(for: request) else {
+            photoOutput.setPreparedPhotoSettingsArray([], completionHandler: nil)
+            return
+        }
+        photoOutput.setPreparedPhotoSettingsArray([settings]) { prepared, error in
+            if let error {
+                print("❌ Photo pipeline preparation failed: \(error)")
+            } else {
+                print("✅ Photo pipeline prepared (\(request.imageQuality), pure RAW \(request.usePureRawEngine)): \(prepared)")
+            }
+        }
+    }
+
+    // Compile the still-photo Core Image graph (tone map, look, grain, P3 output) and the
+    // JPEG encoder once, off the shutter path, so the first capture does not pay for it.
+    private func warmUpStillProcessing() {
+        processingQueue.async { [weak self] in
+            guard let self else { return }
+            autoreleasepool {
+                let sample = CIImage(color: CIColor(red: 0.4, green: 0.35, blue: 0.3))
+                    .cropped(to: CGRect(x: 0, y: 0, width: 64, height: 48))
+                let looks = FilmEngine.shared.availableSimulations.filter { $0.look != nil }
+                let cube = looks.first { if case .cube = $0.look { true } else { false } }
+                let effect = looks.first { if case .photoEffect = $0.look { true } else { false } }
+                for style in [cube, effect].compactMap({ $0 }) {
+                    let look = FilmRenderSettings(style: style, colorAmount: 0.5, grainAmount: 1, appliesLook: true)
+                    _ = self.renderFilteredJPEG(from: sample, with: [:], look: look, captureID: 0, pixelsAreUpright: false)
+                }
+            }
         }
     }
     
@@ -95,58 +305,102 @@ class SessionManager: NSObject {
         let currentSS = camera.parameterManager.SS
         let currentISO = camera.parameterManager.ISO
         let currentEV = camera.parameterManager.EV
-        let device = camera.lensManager.currentLens.device
+        guard let lens = camera.lensManager.currentLens else { return }
+        let device = lens.device
+        let meterActive = currentSS != ExposureParameter.auto && currentISO != ExposureParameter.auto
+        meterLock.lock()
+        if meterActive != meterIsActive {
+            meterIsActive = meterActive
+            hasMeterReading = false
+            lastMeterDisplayValue = nil
+        }
+        meterLock.unlock()
         
         sessionQueue.async { [weak self] in
             do {
                 try device.lockForConfiguration()
-                let isManual = (currentSS != "AUTO" && currentISO != "AUTO")
+                let isManual = (currentSS != ExposureParameter.auto && currentISO != ExposureParameter.auto)
                 
                 if isManual {
-                    let duration = self?.parseShutterSpeed(currentSS) ?? AVCaptureDevice.currentExposureDuration
-                    var isoValue = Float(currentISO) ?? 100.0
-                    if isoValue > camera.lensManager.currentLens.maxISO {
-                        isoValue = camera.lensManager.currentLens.maxISO
-                    } else if isoValue < camera.lensManager.currentLens.minISO {
-                        isoValue = camera.lensManager.currentLens.minISO
+                    let duration = ExposureParameter.shutterDuration(currentSS) ?? device.exposureDuration
+                    let iso = ExposureParameter.isoValue(currentISO) ?? device.iso
+                    if device.isExposureModeSupported(.custom) {
+                        self?.applyManualExposure(duration: duration, iso: iso, to: device)
                     }
-                    device.setExposureModeCustom(duration: duration, iso: isoValue, completionHandler: nil)
                 } else {
-                    if let evValue = Float(currentEV) {
-                        if camera.parameterManager.isPureRawEngineEnabled {
-                            device.setExposureTargetBias(evValue - 0.5, completionHandler: nil) // Protect highlight
-                        } else {
-                            device.setExposureTargetBias(evValue, completionHandler: nil)
-                        }
+                    if let evValue = Float(currentEV), evValue.isFinite {
+                        device.setExposureTargetBias(min(max(evValue, device.minExposureTargetBias), device.maxExposureTargetBias), completionHandler: nil)
                     }
-                    device.exposureMode = .continuousAutoExposure
+                    if device.isExposureModeSupported(.continuousAutoExposure) {
+                        device.exposureMode = .continuousAutoExposure
+                    }
                 }
                 device.unlockForConfiguration()
             } catch { print("曝光控制失败: \(error)") }
         }
     }
     
+    // Caller holds the configuration lock. The active format may have changed since the dial was set.
+    private func applyManualExposure(duration: CMTime, iso: Float, to device: AVCaptureDevice,
+                                     completion: ((CMTime) -> Void)? = nil) {
+        let format = device.activeFormat
+        let boundedDuration = CMTimeMinimum(CMTimeMaximum(duration, format.minExposureDuration), format.maxExposureDuration)
+        let boundedISO = min(max(iso.isFinite ? iso : device.iso, format.minISO), format.maxISO)
+        device.setExposureTargetBias(0, completionHandler: nil)
+        device.setExposureModeCustom(duration: boundedDuration, iso: boundedISO, completionHandler: completion)
+    }
+
     private func setupLightMeter(for device: AVCaptureDevice) {
-        exposureOffsetObserver?.invalidate()
-        exposureOffsetObserver = device.observe(\.exposureTargetOffset, options: [.new]) { [weak self] device, _ in
-            guard let self = self, let camera = self.delegate else { return }
-            if camera.parameterManager.SS != "AUTO" && camera.parameterManager.ISO != "AUTO" {
-                let rawOffset = device.exposureTargetOffset
-                self.smoothedOffset = (self.smoothedOffset * 0.8) + (rawOffset * 0.2)
-                let now = Date().timeIntervalSince1970
-                if now - self.lastUpdateTimestamp > 0.15 {
-                    var displayValue = self.smoothedOffset
-                    if abs(displayValue) < 0.15 { displayValue = 0.0 }
-                    let formattedOffset = String(format: "%+.1f", displayValue)
-                    DispatchQueue.main.async {
-                        if camera.parameterManager.EV != formattedOffset {
-                            camera.parameterManager.EV = formattedOffset
-                            self.lastUpdateTimestamp = now
-                        }
-                    }
-                }
-            }
+        meterLock.lock()
+        smoothedOffset = 0.0
+        lastMeterDisplayValue = nil
+        lastUpdateTimestamp = 0
+        hasMeterReading = false
+        meterLock.unlock()
+    }
+
+    // Runs on the video queue with every frame while manual exposure is on.
+    nonisolated private func meter(_ pixelBuffer: CVPixelBuffer) {
+        meterLock.lock()
+        let now = ProcessInfo.processInfo.systemUptime
+        let due = now - lastMeterSampleTimestamp >= meterSampleInterval
+        if due { lastMeterSampleTimestamp = now }
+        meterLock.unlock()
+        guard due, let rawOffset = ExposureMeter.offset(pixelBuffer: pixelBuffer) else { return }
+
+        meterLock.lock()
+        latestFrameStops = rawOffset
+        latestFrameTimestamp = now
+        guard meterIsActive else { meterLock.unlock(); return }
+        // Start from the first reading instead of easing in from 0.
+        smoothedOffset = hasMeterReading
+            ? smoothedOffset * meterSmoothing + rawOffset * (1.0 - meterSmoothing)
+            : rawOffset
+        hasMeterReading = true
+        var displayValue = smoothedOffset
+        guard now - lastUpdateTimestamp > meterUpdateInterval else { meterLock.unlock(); return }
+        if abs(displayValue) < meterZeroDeadband { displayValue = 0.0 }
+        displayValue = (displayValue * 10).rounded() / 10
+        if let lastValue = lastMeterDisplayValue, abs(displayValue - lastValue) < meterDisplayDeadband {
+            meterLock.unlock()
+            return
         }
+        lastUpdateTimestamp = now
+        lastMeterDisplayValue = displayValue
+        meterLock.unlock()
+
+        let formattedOffset = String(format: "%+.1f", displayValue)
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let camera = self.delegate, self.isMeterActive,
+                  camera.parameterManager.EV != formattedOffset else { return }
+            camera.parameterManager.EV = formattedOffset
+        }
+    }
+
+    private var isMeterActive: Bool {
+        meterLock.lock()
+        defer { meterLock.unlock() }
+        return meterIsActive
     }
     
     func HDRswitch(_ mode: Bool, device: AVCaptureDevice) {
@@ -190,75 +444,137 @@ class SessionManager: NSObject {
         }
     }
     
-    private func saveImageDataToLibrary(_ data: Data, isRaw: Bool) {
-        ShutterManager.incrementShutter()
+    private func saveToLibrary(photo: Data?, raw: Data?) {
+        switch (photo, raw) {
+        case let (photo?, raw?): savePair(photo: photo, raw: raw)
+        case let (photo?, nil): saveSingle(photo, label: "JPEG")
+        case let (nil, raw?): saveSingle(raw, label: "RAW")
+        case (nil, nil): break
+        }
+    }
+
+    private func saveSingle(_ data: Data, label: String) {
         PHPhotoLibrary.shared().performChanges({
-            let creationRequest = PHAssetCreationRequest.forAsset()
-            
-            if isRaw {
-                // 💡 修复点：使用 PHAssetResourceCreationOptions 的正确方式
-                let options = PHAssetResourceCreationOptions()
-                // 确保 DNG 格式被正确识别，有些 iOS 版本需要通过 options 显式指定
-                creationRequest.addResource(with: .photo, data: data, options: options)
-            } else {
-                creationRequest.addResource(with: .photo, data: data, options: nil)
-            }
+            PHAssetCreationRequest.forAsset().addResource(with: .photo, data: data, options: nil)
         }) { success, error in
             if success {
-                print("✅ \(isRaw ? "RAW" : "JPEG") 保存成功")
-            } else if let error = error {
-                print("❌ 保存失败: \(error.localizedDescription)")
+                print("✅ Saved \(label)")
+            } else {
+                print("❌ Saving \(label) failed: \(String(describing: error))")
+            }
+        }
+    }
+
+    // One asset with the JPEG as the photo and the DNG as its alternate, the way Apple's
+    // RAW capture sample does it: the DNG goes in as a file with a .dng extension so
+    // Photos can identify it. If Photos rejects the pair, both are saved separately so
+    // nothing is lost.
+    private func savePair(photo: Data, raw: Data) {
+        let rawURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString).appendingPathExtension("dng")
+        do {
+            try raw.write(to: rawURL)
+        } catch {
+            print("❌ Writing DNG for RAW+JPEG failed: \(error)")
+            saveSingle(photo, label: "JPEG")
+            saveSingle(raw, label: "RAW")
+            return
+        }
+        PHPhotoLibrary.shared().performChanges({
+            let creationRequest = PHAssetCreationRequest.forAsset()
+            let photoOptions = PHAssetResourceCreationOptions()
+            photoOptions.uniformTypeIdentifier = UTType.jpeg.identifier
+            creationRequest.addResource(with: .photo, data: photo, options: photoOptions)
+            let rawOptions = PHAssetResourceCreationOptions()
+            rawOptions.shouldMoveFile = true
+            creationRequest.addResource(with: .alternatePhoto, fileURL: rawURL, options: rawOptions)
+        }) { [weak self] success, error in
+            try? FileManager.default.removeItem(at: rawURL)
+            if success {
+                print("✅ Saved RAW+JPEG")
+            } else {
+                print("❌ Saving RAW+JPEG as one asset failed, saving separately: \(String(describing: error))")
+                self?.saveSingle(photo, label: "JPEG")
+                self?.saveSingle(raw, label: "RAW")
             }
         }
     }
     
-    func capturePhoto(orientation: AVCaptureVideoOrientation, userSettings: (String, Bool)) { // (imageQuality, isFront)
-        guard let connection = photoOutput.connection(with: .video) else { return }
+    func capturePhoto(
+        orientation: AVCaptureVideoOrientation,
+        request: PhotoCaptureRequest
+    ) {
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+
+            if request.usesManualExposure,
+               let duration = request.manualExposureDuration,
+               let iso = request.manualISO,
+               let deviceInput = self.session.inputs.compactMap({ $0 as? AVCaptureDeviceInput }).first,
+               deviceInput.device.isExposureModeSupported(.custom) {
+                do {
+                    let device = deviceInput.device
+                    try device.lockForConfiguration()
+                    self.applyManualExposure(duration: duration, iso: iso, to: device) { [weak self] _ in
+                        self?.sessionQueue.async {
+                            self?.performPhotoCapture(orientation: orientation, request: request)
+                        }
+                    }
+                    device.unlockForConfiguration()
+                } catch {
+                    self.failPhotoCapture(error)
+                }
+                return
+            }
+
+            self.performPhotoCapture(orientation: orientation, request: request)
+        }
+    }
+
+    private func performPhotoCapture(
+        orientation: AVCaptureVideoOrientation,
+        request: PhotoCaptureRequest
+    ) {
+        guard let connection = photoOutput.connection(with: .video),
+              let photoSettings = makePhotoSettings(for: request) else {
+            failPhotoCapture(nil)
+            return
+        }
+
         connection.videoOrientation = orientation
-        let (imageQuality, isFront) = userSettings
-        let rawFormat = photoOutput.availableRawPhotoPixelFormatTypes.first
-        var photoSettings: AVCapturePhotoSettings
-        
-        let pureEngine = delegate?.parameterManager.isPureRawEngineEnabled ?? false
-        
-        // 💡 1. Zero Process 终极霸王条款：
-        // 只要开了 pureEngine，且不是纯 DNG 模式，一律只向硬件要 RAW！彻底切断苹果的熟肉流水线！
-        if pureEngine && imageQuality != "DNG" && rawFormat != nil {
-            photoSettings = AVCapturePhotoSettings(rawPixelFormatType: rawFormat!)
+        if connection.isVideoMirroringSupported {
+            connection.isVideoMirrored = request.isFrontCamera
         }
-        // 2. 以下是普通的下单逻辑
-        else if imageQuality == "DNG+J" && rawFormat != nil {
-            photoSettings = AVCapturePhotoSettings(rawPixelFormatType: rawFormat!, processedFormat: [AVVideoCodecKey: AVVideoCodecType.hevc])
-        } else if imageQuality == "DNG" && rawFormat != nil {
-            photoSettings = AVCapturePhotoSettings(rawPixelFormatType: rawFormat!)
-        } else {
-            photoSettings = AVCapturePhotoSettings(format: [AVVideoCodecKey: AVVideoCodecType.hevc])
+
+        photoSettings.isShutterSoundSuppressionEnabled =
+            photoOutput.isShutterSoundSuppressionSupported
+
+        var context = CaptureContext(request: request)
+        if request.usePureRawEngine {
+            meterLock.lock()
+            let fresh = ProcessInfo.processInfo.systemUptime - latestFrameTimestamp < 0.5
+            context.previewStops = fresh ? latestFrameStops : nil
+            meterLock.unlock()
         }
-        
-        
-        photoSettings.photoQualityPrioritization = .speed
-        photoSettings.isShutterSoundSuppressionEnabled = true
-        
-        if isFront && connection.isVideoMirroringSupported {
-            connection.isVideoMirrored = true
-        }
-        
+        captureContextLock.lock()
+        captureContexts[photoSettings.uniqueID] = context
+        captureContextLock.unlock()
+
         photoOutput.capturePhoto(with: photoSettings, delegate: self)
     }
-    
-    private func parseShutterSpeed(_ ss: String) -> CMTime {
-        if let doubleVal = Double(ss) {
-            return CMTime(value: 1000, timescale: Int32(1000 / doubleVal))
+
+    private func failPhotoCapture(_ error: Error?) {
+        if let error {
+            print("Photo capture configuration failed: \(error)")
         }
-        
-        let components = ss.components(separatedBy: "/")
-        if components.count == 2,
-           let num = Double(components[0]),
-           let den = Double(components[1]) {
-            return CMTime(value: Int64(num * 1000), timescale: Int32(den * 1000))
+        DispatchQueue.main.async { [weak self] in
+            self?.delegate?.isSensorBusy = false
+            if let camera = self?.delegate {
+                camera.inFlightPhotos = max(0, camera.inFlightPhotos - 1)
+            }
         }
-        return AVCaptureDevice.currentExposureDuration
     }
+    
 }
 
 
@@ -266,169 +582,275 @@ extension SessionManager: AVCaptureVideoDataOutputSampleBufferDelegate { // live
     func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
         guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
         
-        // MARK: Pipeline STEP 1
-        // MARK: Offload METAL stuff to MetalWH Processor
-        if let camera = self.delegate {
-            MetalWHProcessor.shared.process(pixelBuffer: pixelBuffer)
-        }
-        
-        // MARK: Pipeline STEP 2
-        // MARK: MIRROR
-        var ciImage = CIImage(cvPixelBuffer: pixelBuffer)
-        
-        
-        if self.physicalStreamingPosition == .front {
-            ciImage = ciImage.oriented(.downMirrored)
-        }
-        
-        // MARK: Pipeline STEP 3
-        // MARK: FILM SIM
-        guard let camera = self.delegate else { return }
-        let finalImage = (camera.parameterManager.imageQuality == "DNG") ? ciImage :
-        FilmEngine.shared.process(ciImage,
-                                  styleName: camera.parameterManager.style,
-                                  lutIntensity: camera.lutIntensity,
-                                  grainIntensity: camera.grainIntensity)
-        
-        
-        if let cgImage = context.createCGImage(finalImage, from: finalImage.extent) {
-            DispatchQueue.main.async {
-                camera.currentPreviewImage = cgImage
-            }
-        }
+        MetalWHProcessor.shared.process(pixelBuffer: pixelBuffer)
+        meter(pixelBuffer)
+
+        // The video feed is already demosaiced. For RAW-only modes the preview
+        // shows this reference feed with the look bypassed.
+        let mirrored = connection.inputPorts.first?.sourceDevicePosition == .front
+        let input = CIImage(cvPixelBuffer: pixelBuffer)
+        // Tone map before orienting the CIImage so its original headroom is available.
+        let image = FilmEngine.prepareSDR(input)
+        previewFrames.update(image: mirrored ? image.oriented(.downMirrored) : image, mirrored: mirrored)
     }
 }
     
 extension SessionManager: AVCapturePhotoCaptureDelegate { // photo stream
     func photoOutput(_ output: AVCapturePhotoOutput, didFinishProcessingPhoto photo: AVCapturePhoto, error: Error?) {
-        guard let camera = self.delegate, error == nil else { return }
-        
-        // 路由分发：根据照片类型，送入不同的“冲洗车间”
+        guard error == nil,
+              let captureContext = captureContext(for: photo.resolvedSettings.uniqueID) else { return }
+
         if photo.isRawPhoto {
-            processRawPhoto(photo, camera: camera)
+            processRawPhoto(photo, captureContext: captureContext)
         } else {
-            processProcessedPhoto(photo, camera: camera)
+            processProcessedPhoto(photo, captureContext: captureContext)
         }
     }
     
-    func photoOutput(_ output: AVCapturePhotoOutput, didCapturePhotoFor resolvedSettings: AVCaptureResolvedPhotoSettings) {
+    func photoOutput(_ output: AVCapturePhotoOutput, didFinishCaptureFor resolvedSettings: AVCaptureResolvedPhotoSettings, error: Error?) {
+        let processedDimensions = resolvedSettings.photoDimensions
+        let rawDimensions = resolvedSettings.rawPhotoDimensions
+        let deliveredDimensions = processedDimensions.photoPixelCount >= rawDimensions.photoPixelCount
+            ? processedDimensions
+            : rawDimensions
+
+        if error == nil {
+            ShutterManager.incrementShutter()
+        }
+
         DispatchQueue.main.async {
-            // 立刻撤销黑屏！画面瞬间恢复！
             self.delegate?.isSensorBusy = false
+            if deliveredDimensions.width > 0 && deliveredDimensions.height > 0 {
+                self.delegate?.lastCaptureResolution =
+                    "\(deliveredDimensions.width)×\(deliveredDimensions.height)"
+            }
+        }
+
+        markCaptureFinished(uniqueID: resolvedSettings.uniqueID)
+    }
+
+    private func captureContext(for uniqueID: Int64) -> CaptureContext? {
+        captureContextLock.lock()
+        defer { captureContextLock.unlock() }
+        return captureContexts[uniqueID]
+    }
+
+    private func beginProcessing(uniqueID: Int64) {
+        captureContextLock.lock()
+        if var context = captureContexts[uniqueID] {
+            context.pendingProcessingJobs += 1
+            captureContexts[uniqueID] = context
+        }
+        captureContextLock.unlock()
+    }
+
+    private func finishProcessing(uniqueID: Int64) {
+        captureContextLock.lock()
+        var shouldReleaseBuffer = false
+        var completed: CaptureContext?
+        if var context = captureContexts[uniqueID] {
+            context.pendingProcessingJobs = max(0, context.pendingProcessingJobs - 1)
+            if context.captureFinished && context.pendingProcessingJobs == 0 {
+                captureContexts.removeValue(forKey: uniqueID)
+                shouldReleaseBuffer = true
+            } else {
+                captureContexts[uniqueID] = context
+            }
+            completed = shouldReleaseBuffer ? context : nil
+        }
+        captureContextLock.unlock()
+
+        if let completed {
+            saveToLibrary(photo: completed.photoData, raw: completed.rawData)
+        }
+        if shouldReleaseBuffer {
+            releaseInFlightBuffer()
+        }
+    }
+
+    private func markCaptureFinished(uniqueID: Int64) {
+        captureContextLock.lock()
+        var shouldReleaseBuffer = false
+        var completed: CaptureContext?
+        if var context = captureContexts[uniqueID] {
+            context.captureFinished = true
+            if context.pendingProcessingJobs == 0 {
+                captureContexts.removeValue(forKey: uniqueID)
+                shouldReleaseBuffer = true
+                completed = context
+            } else {
+                captureContexts[uniqueID] = context
+            }
+        }
+        captureContextLock.unlock()
+
+        if let completed {
+            saveToLibrary(photo: completed.photoData, raw: completed.rawData)
+        }
+        if shouldReleaseBuffer {
+            releaseInFlightBuffer()
+        }
+    }
+
+    private func store(photo: Data? = nil, raw: Data? = nil, uniqueID: Int64) {
+        captureContextLock.lock()
+        if var context = captureContexts[uniqueID] {
+            if let photo { context.photoData = photo }
+            if let raw { context.rawData = raw }
+            captureContexts[uniqueID] = context
+        }
+        captureContextLock.unlock()
+    }
+
+    private func releaseInFlightBuffer() {
+        DispatchQueue.main.async { [weak self] in
+            guard let camera = self?.delegate else { return }
+            camera.inFlightPhotos = max(0, camera.inFlightPhotos - 1)
         }
     }
     
-    private func processRawPhoto(_ photo: AVCapturePhoto, camera: Camera) {
-        // 这两步提取数据很快，在当前线程做
+    private func processRawPhoto(_ photo: AVCapturePhoto, captureContext: CaptureContext) {
         guard let rawData = photo.fileDataRepresentation() else { return }
-        let quality = camera.parameterManager.imageQuality
-        let pureEngine = camera.parameterManager.isPureRawEngineEnabled
-        let metadata = photo.metadata // 提前把元数据拿出来
-        
-        // 🚀 核心：把耗时的操作踢到并发后台队列！
+        let request = captureContext.request
+        let metadata = photo.metadata
+        let uniqueID = photo.resolvedSettings.uniqueID
+
+        beginProcessing(uniqueID: uniqueID)
         processingQueue.async { [weak self] in
-            // 存底片
-            if quality == "DNG" || quality == "DNG+J" {
-                self?.saveImageDataToLibrary(rawData, isRaw: true)
-            }
-            
-            // 自己洗照片 (Zero Process)
-            if pureEngine && quality != "DNG" {
-                // 💡 1. 先初始化 RAW 滤镜容器 (拆开原来的 guard let)
-                guard let rawFilter = CIRAWFilter(imageData: rawData, identifierHint: nil) else { return }
-                
-                // 💡 2. 注入数字暗房微调参数 (驯服 RAW)
-                // A. 强制压暗基准曝光：减去 0.5 到 0.7 档，把死白的高光强行拉回安全区
-                rawFilter.baselineExposure -= 0.4
-                
-                // B. 开启局部色调映射 (LTM)：0.5 左右能很好地平衡胶片感与宽容度
-                rawFilter.localToneMapAmount = 0.5
-                
-                // 💡 3. 参数注入完毕，生成最终的线性图像
-                guard let baseCIImage = rawFilter.outputImage else { return }
-                
-                if camera.parameterManager.style == "STD" {
-                    
-                                    // 1. 必须用 KVC 方式赋值，绕开编译器的属性检查
-                    if let colorFilter = CIFilter(name: "CIColorControls") {
-                        colorFilter.setValue(baseCIImage, forKey: kCIInputImageKey)
-                        colorFilter.setValue(1.25, forKey: kCIInputSaturationKey)
-                        colorFilter.setValue(1.00, forKey: kCIInputContrastKey)
-                        
-                        // 2. 拿到增强后的 CIImage
-                        guard let boostedImage = colorFilter.outputImage else { return }
-                        
-                        // 3. 🚨 必须送进 renderFilteredJPEG 渲染成 JPEG Data 并缝合元数据！
-                        if let finalJPEGData = self?.renderFilteredJPEG(from: boostedImage, with: metadata, camera: camera) {
-                            self?.saveImageDataToLibrary(finalJPEGData, isRaw: false)
-                        }
+            guard let self else { return }
+            autoreleasepool {
+                defer { self.finishProcessing(uniqueID: uniqueID) }
+
+                if request.imageQuality == "DNG" ||
+                    request.imageQuality == "DNG+J" ||
+                    request.imageQuality == "ProRAW" {
+                    self.store(raw: rawData, uniqueID: uniqueID)
+                }
+
+                if request.usePureRawEngine, ParameterManager.savesJPEG(quality: request.imageQuality),
+                   let rawFilter = CIRAWFilter(imageData: rawData, identifierHint: nil) {
+                    // Let the RAW developer roll highlights into SDR before the LUT.
+                    rawFilter.extendedDynamicRangeAmount = 0
+                    if let target = captureContext.previewStops {
+                        rawFilter.exposure = self.matchedRAWExposure(rawData, target: target)
                     }
-                    
-                    
-                    
-                } else {
-                    // 非 STD 模式，直接把原始 baseCIImage 送进去渲染
-                    if let finalJPEGData = self?.renderFilteredJPEG(from: baseCIImage, with: metadata, camera: camera) {
-                        self?.saveImageDataToLibrary(finalJPEGData, isRaw: false)
+                    // CIRAWFilter already rotates the pixels to the stored orientation.
+                    if let baseCIImage = rawFilter.outputImage,
+                       let jpeg = self.renderFilteredJPEG(
+                            from: baseCIImage, with: metadata, look: request.look,
+                            captureID: uniqueID, pixelsAreUpright: true
+                       ) {
+                        self.store(photo: jpeg, uniqueID: uniqueID)
                     }
                 }
             }
-            
-            // 💡 洗完收工，通知 Camera 释放一个内存缓冲位！
-            DispatchQueue.main.async {
-                camera.inFlightPhotos -= 1
-            }
         }
     }
     
-    private func processProcessedPhoto(_ photo: AVCapturePhoto, camera: Camera) {
-        let quality = camera.parameterManager.imageQuality
-        let pureEngine = camera.parameterManager.isPureRawEngineEnabled
-        
-        if quality == "DNG" || pureEngine { return }
-        
-        // 提前拿数据
+    private func processProcessedPhoto(_ photo: AVCapturePhoto, captureContext: CaptureContext) {
+        let request = captureContext.request
+        guard ParameterManager.savesJPEG(quality: request.imageQuality), !request.usePureRawEngine else { return }
+
         guard let imageData = photo.fileDataRepresentation(),
               let ciImage = CIImage(data: imageData) else { return }
         let metadata = photo.metadata
-        
-        // 🚀 踢到后台并发处理！
+        let uniqueID = photo.resolvedSettings.uniqueID
+
+        beginProcessing(uniqueID: uniqueID)
         processingQueue.async { [weak self] in
-            if let finalJPEGData = self?.renderFilteredJPEG(from: ciImage, with: metadata, camera: camera) {
-                self?.saveImageDataToLibrary(finalJPEGData, isRaw: false)
-            }
-            
-            // 💡 释放内存位
-            DispatchQueue.main.async {
-                camera.inFlightPhotos -= 1
+            guard let self else { return }
+            autoreleasepool {
+                defer { self.finishProcessing(uniqueID: uniqueID) }
+                // CIImage(data:) keeps sensor orientation; the orientation tag rotates it.
+                if let finalJPEGData = self.renderFilteredJPEG(
+                    from: ciImage,
+                    with: metadata,
+                    look: request.look,
+                    captureID: uniqueID,
+                    pixelsAreUpright: false
+                ) {
+                    self.store(photo: finalJPEGData, uniqueID: uniqueID)
+                }
             }
         }
     }
     
-    private func renderFilteredJPEG(from ciImage: CIImage, with originalMetadata: [String: Any], camera: Camera) -> Data? {
-        let filteredImage = FilmEngine.shared.process(
-            ciImage,
-            styleName: camera.parameterManager.style,
-            lutIntensity: camera.lutIntensity,
-            grainIntensity: camera.grainIntensity
-        )
-        
-        guard let cgImage = self.context.createCGImage(filteredImage, from: filteredImage.extent) else { return nil }
-        
-        // C. 准备容器
-        let outputData = NSMutableData()
-        guard let destination = CGImageDestinationCreateWithData(outputData as CFMutableData, UTType.jpeg.identifier as CFString, 1, nil) else { return nil }
-                
-        // D. 缝合元数据
-        var finalMetadata = originalMetadata
-        if let orientation = originalMetadata[kCGImagePropertyOrientation as String] {
-            finalMetadata[kCGImagePropertyOrientation as String] = orientation
+    // The viewfinder shows the ISP's rendering, which lifts the image well above a plain
+    // RAW development. Find the global exposure that gives the developed RAW the same
+    // metered brightness as the viewfinder frame at the shutter, using a small draft
+    // development. Only brightness is matched; noise, sharpening and local tone mapping
+    // stay out of the ZERO PROCESSING result.
+    nonisolated static let rawExposureRange: ClosedRange<Float> = -2...3
+
+    private func matchedRAWExposure(_ rawData: Data, target: Float) -> Float {
+        guard let draft = CIRAWFilter(imageData: rawData, identifierHint: nil) else { return 0 }
+        let longEdge = max(draft.nativeSize.width, draft.nativeSize.height)
+        if longEdge > 0 { draft.scaleFactor = Float(min(1, 384 / longEdge)) }
+        draft.extendedDynamicRangeAmount = 0
+
+        func measure(_ exposure: Float) -> Float? {
+            draft.exposure = exposure
+            guard let image = draft.outputImage else { return nil }
+            let width = Int(image.extent.width), height = Int(image.extent.height)
+            guard width > 0, height > 0 else { return nil }
+            var bytes = [UInt8](repeating: 0, count: width * height * 4)
+            context.render(image, toBitmap: &bytes, rowBytes: width * 4, bounds: image.extent,
+                           format: .RGBA8, colorSpace: FilmEngine.deliveryColorSpace)
+            return bytes.withUnsafeBufferPointer {
+                ExposureMeter.offset(bytes: $0.baseAddress!, width: width, height: height,
+                                     rowBytes: width * 4, order: .rgba)
+            }
         }
-                
-        // E. 封口打包
-        CGImageDestinationAddImage(destination, cgImage, finalMetadata as CFDictionary)
+
+        // The RAW tone curve is not linear in exposure, so correct twice.
+        var exposure: Float = 0
+        for _ in 0..<2 {
+            guard let measured = measure(exposure) else { break }
+            let error = target - measured
+            if abs(error) < 0.05 { break }
+            exposure = min(max(exposure + error, Self.rawExposureRange.lowerBound), Self.rawExposureRange.upperBound)
+        }
+        print("ZERO PROCESSING exposure matched to viewfinder: \(String(format: "%+.2f", exposure)) EV")
+        return exposure
+    }
+
+    private func renderFilteredJPEG(
+        from ciImage: CIImage,
+        with originalMetadata: [String: Any],
+        look: FilmRenderSettings,
+        captureID: Int64,
+        pixelsAreUpright: Bool
+    ) -> Data? {
+        let seed = UInt32(truncatingIfNeeded: captureID &* 0x9E3779B9)
+        let filteredImage = FilmEngine.process(FilmEngine.prepareSDR(ciImage), settings: look, grainSeed: seed)
+        guard let cgImage = context.createCGImage(
+            filteredImage, from: filteredImage.extent, format: .RGBA8, colorSpace: FilmEngine.deliveryColorSpace
+        ) else { return nil }
+        
+        let outputData = NSMutableData()
+        guard let destination = CGImageDestinationCreateWithData(
+            outputData as CFMutableData, UTType.jpeg.identifier as CFString, 1, nil
+        ) else { return nil }
+
+        var metadata = originalMetadata
+        // The ICC profile comes from the CGImage's color space.
+        metadata.removeValue(forKey: kCGImagePropertyProfileName as String)
+        let exifKey = kCGImagePropertyExifDictionary as String
+        var exif = metadata[exifKey] as? [String: Any] ?? [:]
+        exif[kCGImagePropertyExifColorSpace as String] = 0xFFFF // Uncalibrated: Display P3 via ICC
+        metadata[exifKey] = exif
+        if pixelsAreUpright {
+            // Keeping the camera's tag would rotate already-upright pixels a second time.
+            metadata[kCGImagePropertyOrientation as String] = CGImagePropertyOrientation.up.rawValue
+            let tiffKey = kCGImagePropertyTIFFDictionary as String
+            var tiff = metadata[tiffKey] as? [String: Any] ?? [:]
+            tiff[kCGImagePropertyTIFFOrientation as String] = CGImagePropertyOrientation.up.rawValue
+            metadata[tiffKey] = tiff
+        }
+        metadata[kCGImageDestinationLossyCompressionQuality as String] = Self.jpegQuality
+
+        CGImageDestinationAddImage(destination, cgImage, metadata as CFDictionary)
         guard CGImageDestinationFinalize(destination) else { return nil }
-                
         return outputData as Data
     }
 }

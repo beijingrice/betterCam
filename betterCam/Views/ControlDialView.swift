@@ -6,13 +6,14 @@
 //
 import SwiftUI
 struct ControlDialView: View {
+    let dialSize: CGFloat
+    let verticalSpacing: CGFloat
+
     var body: some View {
-        VStack(spacing: 0) {
-            Spacer()
-            KnurledDialView()
-                .padding(.bottom, 60)
+        VStack(spacing: verticalSpacing) {
+            KnurledDialView(dialSize: dialSize)
             ShutterButtonView()
-            Spacer()
         }
+        .fixedSize()
     }
 }

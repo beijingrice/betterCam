@@ -38,5 +38,7 @@ kernel void waveformKernel(texture2d<float, access::read> inTexture [[texture(0)
     // 这里使用白色 (1,1,1) 让它看起来像一条纯粹的亮度曲线
     if (gid.y == targetY) {
         outTexture.write(float4(1.0, 1.0, 1.0, 0.9), gid);
+    } else if (abs(int(gid.y) - int(targetY)) == 1) {
+        outTexture.write(float4(1.0, 1.0, 1.0, 0.28), gid);
     }
 }

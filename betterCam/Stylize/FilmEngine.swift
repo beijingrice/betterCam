@@ -1,314 +1,170 @@
-import CoreImage
-import UIKit
 import Combine
+import CoreImage
+import CoreImage.CIFilterBuiltins
+import os
 
-enum FilmStyleType {
-    case builtIn    // 内部写死的滤镜组合
-    case lut // 基于 LUT 文件的滤镜
-    case builtInLut
+struct FilmGrain {
+    let size: Float
+    let amplitude: Float
+    var chroma: Float = 0
+
+    // `size` is the grain cell as a fraction of the short edge; a grain spans about two
+    // cells. Around 0.0008 puts roughly 600 grains across the short edge, close to 35 mm
+    // film, and stays fine on a 48 MP capture.
+    static let color = FilmGrain(size: 0.0008, amplitude: 0.10)
+    static let monochrome = FilmGrain(size: 0.00095, amplitude: 0.13)
+    static let imported = FilmGrain(size: 0.00078, amplitude: 0.10)
 }
 
 struct FilmSimulation {
+    enum Look {
+        case photoEffect(String)
+        case cube(FilmLUT, LUTEncoding)
+    }
+
     var name: String
-    let type: FilmStyleType
-    let filterName: String?
-    let lutData: Data?
-    let dimension: Int
-    let isFilm: Bool
+    var look: Look?
+    var grain: FilmGrain?
+    var fileName: String?
+
+    var customEncoding: LUTEncoding? {
+        guard fileName != nil, case let .cube(_, encoding) = look else { return nil }
+        return encoding
+    }
 }
 
-class FilmEngine: ObservableObject {
+struct FilmRenderSettings {
+    var simulation: FilmSimulation? = nil
+    var colorAmount: Float = 0
+    var grainAmount: Float = 0
+
+    static let standard = FilmRenderSettings(style: nil, colorAmount: 0, grainAmount: 0, appliesLook: false)
+
+    init(style: FilmSimulation?, colorAmount: Float, grainAmount: Float, appliesLook: Bool) {
+        guard appliesLook, let style, style.look != nil else { return }
+        simulation = style
+        self.colorAmount = min(max(colorAmount, 0), 1)
+        self.grainAmount = min(max(grainAmount, 0), 1)
+    }
+}
+
+final class FilmEngine: ObservableObject {
     static let shared = FilmEngine()
-    private let context = CIContext()
-    private var staticGrainOverlay: CIImage?
-    
-    // 💡 设为 @Published 确保 UI 拨盘能实时刷新
-    @Published var availableSimulations: [FilmSimulation] = []
+    static let standardName = "STD"
+    static let manageName = "MANAGE"
+    static let workingColorSpace = CGColorSpace(name: CGColorSpace.extendedLinearSRGB)!
+    static let sRGBColorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+    // Viewfinder and JPEG. Looks are authored in sRGB, but unstyled or partly styled
+    // pixels keep the camera's wider gamut instead of being clipped to sRGB.
+    static let deliveryColorSpace = CGColorSpace(name: CGColorSpace.displayP3)!
 
-    init() {
-        // 1. 先填充基础内置滤镜
-        setupInitialStyles()
-        // 2. 加载随 App 打包的 .cube 文件 (Xcode 里的资源)
-        loadBundleLUTs()
-        // 3. 加载用户手动导入并存到沙盒里的 LUT
-        loadSavedCustomLUTs()
-        // Get noise generator ready
-        prepareStaticGrain()
-    }
-    
-    private func prepareStaticGrain() {
-        let noiseGenerator = CIFilter(name: "CIRandomGenerator")!
-        guard let noise = noiseGenerator.outputImage?.cropped(to: CGRect(x: 0, y: 0, width: 2000, height: 2000)) else { return }
-        
-        // 预设好黑白感、对比度以及基础亮度（EV -3.5 让它若隐若现）
-        let processedNoise = noise
-            .applyingFilter("CIColorControls", parameters: [
-                kCIInputSaturationKey: 0,
-                kCIInputContrastKey: 1.1
-            ])
-            .applyingFilter("CIExposureAdjust", parameters: [kCIInputEVKey: -2.5])
-        
-        self.staticGrainOverlay = processedNoise
-    }
-    
-    
-    private func applyDynamicGrain(to input: CIImage, intensity: Float) -> CIImage {
-        // 1. 生成原始噪点
-        guard let noise = CIFilter(name: "CIRandomGenerator")?.outputImage else { return input }
-        
-        // 2. 模拟颗粒结块 (Blur - 控制尺寸)
-        // 保持原来的逻辑：强度越大，模糊半径越大，颗粒越大块
-        let blurRadius = Double(intensity * 1.5)
-        let blurredNoise = noise.applyingFilter("CIGaussianBlur", parameters: [
-            kCIInputRadiusKey: blurRadius
-        ])
-        
-        // 3. 💡 关键修改：暴力去亮 + 极端对比度
-        // 目标：把噪点层变成“白纸上的黑点”，而不是“灰纸上的灰点”
-        
-        let processedGrain = blurredNoise
-            .applyingFilter("CIColorControls", parameters: [
-                kCIInputSaturationKey: 0,    // 彻底去色
-                kCIInputContrastKey: 2.0 + (intensity * 3.0), // 极高对比度，让颗粒边缘像刀切一样硬
-                kCIInputBrightnessKey: 0.0
-            ])
-            // 💡 核心魔法：使用 ColorMatrix 进行“暗部偏移”
-            .applyingFilter("CIColorMatrix", parameters: [
-                // R, G, B 全部乘以 1 (保持原值)，但 Bias (偏移) 减去 0.3 ~ 0.5
-                // 这意味着：原来的中灰(0.5)会变成(0.1)甚至(0.0)的纯黑。
-                // 只有原来的极亮部(0.9+)才能勉强保留一点点灰度，其余全被压成黑色。
-                "inputBiasVector": CIVector(x: -0.3 - CGFloat(intensity * 0.2),
-                                            y: -0.3 - CGFloat(intensity * 0.2),
-                                            z: -0.3 - CGFloat(intensity * 0.2),
-                                            w: 0)
-            ])
-        
-        // 4. 调整透明度
-        // 因为现在是纯黑颗粒，不需要太高透明度就能看得很清楚
-        let alpha = 0.2 + (intensity * 0.2)
-        let finalGrain = processedGrain.applyingFilter("CIColorMatrix", parameters: [
-            "inputAVector": CIVector(x: 0, y: 0, z: 0, w: CGFloat(alpha))
-        ])
+    @Published var availableSimulations: [FilmSimulation]
+    let documents: URL
+    let preferences: UserDefaults
 
-        // 5. 混合模式改为 Overlay 或 HardLight
-        // 裁剪很重要，否则性能崩溃
-        let croppedGrain = finalGrain.cropped(to: input.extent)
-        
-        // 💡 如果你觉得 Overlay 还是不够黑，可以试试 "CILinearBurnBlendMode" (线性加深) 或 Stay with Overlay
-        // Overlay 在处理深色层时，会显著压暗背景，非常适合模拟银盐阻光效果。
-        let combined = CIFilter(name: "CIMultiplyBlendMode", parameters: [
-            kCIInputImageKey: croppedGrain,
-            kCIInputBackgroundImageKey: input
-        ])?.outputImage
-
-        return combined ?? input
-    }
-    
-    
-    
-    private func setupInitialStyles() {
+    init(
+        documents: URL = URL.documentsDirectory,
+        preferences: UserDefaults = .standard,
+        bundle: Bundle = .main
+    ) {
+        self.documents = documents
+        self.preferences = preferences
         self.availableSimulations = [
-            FilmSimulation(name: "STD", type: .builtIn, filterName: nil, lutData: nil, dimension: 0, isFilm: false),
-            
-            // --- 彩色系列 ---
-            // 鲜艳/正片
-            FilmSimulation(name: "CHROME", type: .builtIn, filterName: "CIPhotoEffectChrome", lutData: nil, dimension: 0, isFilm: false),
-            // 拍立得/即时
-            FilmSimulation(name: "INSTANT", type: .builtIn, filterName: "CIPhotoEffectInstant", lutData: nil, dimension: 0, isFilm: false),
-            // 褪色/复古
-            FilmSimulation(name: "FADE", type: .builtIn, filterName: "CIPhotoEffectFade", lutData: nil, dimension: 0, isFilm: false),
-            // 冲印/冷调
-            FilmSimulation(name: "PROCESS", type: .builtIn, filterName: "CIPhotoEffectProcess", lutData: nil, dimension: 0, isFilm: false),
-            // 传送/怀旧
-            FilmSimulation(name: "TRANSFER", type: .builtIn, filterName: "CIPhotoEffectTransfer", lutData: nil, dimension: 0, isFilm: false),
-            
-            // --- 黑白系列 ---
-            // 纯净黑白
-            FilmSimulation(name: "MONO", type: .builtIn, filterName: "CIPhotoEffectMono", lutData: nil, dimension: 0, isFilm: false),
-            // 电影黑白
-            FilmSimulation(name: "NOIR", type: .builtIn, filterName: "CIPhotoEffectNoir", lutData: nil, dimension: 0, isFilm: false),
-            // 银盐黑白
-            FilmSimulation(name: "TONAL", type: .builtIn, filterName: "CIPhotoEffectTonal", lutData: nil, dimension: 0, isFilm: false)
+            FilmSimulation(name: Self.standardName),
+            FilmSimulation(name: "CHROME", look: .photoEffect("CIPhotoEffectChrome"), grain: .color),
+            FilmSimulation(name: "INSTANT", look: .photoEffect("CIPhotoEffectInstant"), grain: .color),
+            FilmSimulation(name: "FADE", look: .photoEffect("CIPhotoEffectFade"), grain: .color),
+            FilmSimulation(name: "PROCESS", look: .photoEffect("CIPhotoEffectProcess"), grain: .color),
+            FilmSimulation(name: "TRANSFER", look: .photoEffect("CIPhotoEffectTransfer"), grain: .color),
+            FilmSimulation(name: "MONO", look: .photoEffect("CIPhotoEffectMono"), grain: .monochrome),
+            FilmSimulation(name: "NOIR", look: .photoEffect("CIPhotoEffectNoir"), grain: .monochrome),
+            FilmSimulation(name: "TONAL", look: .photoEffect("CIPhotoEffectTonal"), grain: .monochrome)
         ]
+        loadBundleLUTs(from: bundle)
+        loadSavedCustomLUTs()
     }
 
-    // 💡 扫描 Xcode 项目工程里直接拖进去的 .cube 文件
-    private func loadBundleLUTs() {
-        guard let urls = Bundle.main.urls(forResourcesWithExtension: "cube", subdirectory: nil) else { return }
-        for url in urls {
-            if let result = parseCubeFile(at: url) {
-                let name = url.deletingPathExtension().lastPathComponent.uppercased()
-                if !availableSimulations.contains(where: { $0.name == name }) {
-                    let sim = FilmSimulation(name: name, type: .builtInLut, filterName: nil, lutData: result.data, dimension: result.dimension, isFilm: true)
-                    self.availableSimulations.append(sim)
-                }
-            }
+    private func loadBundleLUTs(from bundle: Bundle) {
+        let presets: [(file: String, grain: FilmGrain)] = [
+            ("Fujicolor_400", FilmGrain(size: 0.00105, amplitude: 0.13, chroma: 0.035)),
+            ("Fujicolor_C200", FilmGrain(size: 0.00078, amplitude: 0.10, chroma: 0.03)),
+            ("Kodak_Gold_200", FilmGrain(size: 0.00075, amplitude: 0.10, chroma: 0.025)),
+            ("Kodak_Vision3_250D_5207", FilmGrain(size: 0.00065, amplitude: 0.085, chroma: 0.02))
+        ]
+        for preset in presets {
+            guard let url = bundle.url(forResource: preset.file, withExtension: "cube"),
+                  let cube = try? FilmLUT(contentsOf: url) else { continue }
+            // The files carry no color-space metadata, but their gray axes are ordinary
+            // film curves on sRGB code values (mid gray stays near 0.45–0.5). Read as
+            // linear input they crushed everything below ~0.25 sRGB to black.
+            availableSimulations.append(FilmSimulation(
+                name: preset.file.uppercased(), look: .cube(cube, .sRGB), grain: preset.grain
+            ))
         }
-    }
-    
-    
-    func process(_ input: CIImage, styleName: String, lutIntensity: Float, grainIntensity: Float) -> CIImage {
-        guard styleName != "STD" || grainIntensity > 0 else {
-            return input
-        }
-        
-        var output = input
-        
-        // 2. 找到对应的滤镜配置
-        if let sim = availableSimulations.first(where: { $0.name == styleName }), styleName != "STD" {
-            var filteredImage: CIImage?
-            
-            if sim.type == .builtIn, let filterName = sim.filterName {
-                filteredImage = input.applyingFilter(filterName)
-            } else if (sim.type == .lut || sim.type == .builtInLut), let data = sim.lutData {
-                let filter = CIFilter(name: "CIColorCube")!
-                filter.setValue(sim.dimension, forKey: "inputCubeDimension")
-                filter.setValue(data, forKey: "inputCubeData")
-                filter.setValue(input, forKey: kCIInputImageKey)
-                filteredImage = filter.outputImage
-            }
-            
-            // 💡 关键：根据 lutIntensity 混合原图和滤镜图
-            if let filtered = filteredImage {
-                // 使用遮罩滤镜实现 alpha 混合
-                let blendFilter = CIFilter(name: "CIBlendWithAlphaMask")!
-                blendFilter.setValue(filtered, forKey: kCIInputImageKey) // 上层：滤镜后的图
-                blendFilter.setValue(input, forKey: kCIInputBackgroundImageKey) // 下层：原图
-                
-                // 创建一个纯色的强度遮罩
-                let alphaColor = CIColor(red: CGFloat(lutIntensity), green: CGFloat(lutIntensity), blue: CGFloat(lutIntensity), alpha: CGFloat(lutIntensity))
-                let maskImage = CIImage(color: alphaColor).cropped(to: input.extent)
-                blendFilter.setValue(maskImage, forKey: kCIInputMaskImageKey)
-                
-                output = blendFilter.outputImage ?? input
-            }
-        }
-        
-        // 3. 💡 关键：根据 grainIntensity 应用噪点
-        if grainIntensity > 0 && styleName != "STD" && styleName != "MANAGE" {
-            output = applyDynamicGrain(to: output, intensity: grainIntensity)
-        }
-        
-        return output
     }
 
-    // 💡 解析 .cube 文件逻辑
-    func parseCubeFile(at url: URL) -> (data: Data, dimension: Int)? {
-        guard let content = try? String(contentsOf: url) else { return nil }
-        var cubeData = [Float32]()
-        var dimension: Int = 0
-        
-        let lines = content.components(separatedBy: .newlines)
-        for line in lines {
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
-            if trimmed.isEmpty || trimmed.hasPrefix("#") { continue }
-            
-            if trimmed.hasPrefix("LUT_3D_SIZE") {
-                if let sizeString = trimmed.components(separatedBy: .whitespaces).last,
-                   let size = Int(sizeString) {
-                    dimension = size
-                }
-                continue
+    func settings(styleName: String, colorAmount: Float, grainAmount: Float, appliesLook: Bool) -> FilmRenderSettings {
+        FilmRenderSettings(
+            style: availableSimulations.first(where: { $0.name == styleName }),
+            colorAmount: colorAmount, grainAmount: grainAmount, appliesLook: appliesLook
+        )
+    }
+
+    // Both destinations are SDR. Only compress a source that advertises HDR headroom.
+    static func prepareSDR(_ input: CIImage) -> CIImage {
+        let headroom = input.contentHeadroom
+        guard headroom > 1 else { return input }
+        let toneMap = CIFilter.toneMapHeadroom()
+        toneMap.inputImage = input
+        toneMap.sourceHeadroom = headroom
+        toneMap.targetHeadroom = 1
+        return toneMap.outputImage ?? input
+    }
+
+    static func process(_ input: CIImage, settings: FilmRenderSettings, grainSeed: UInt32) -> CIImage {
+        guard let simulation = settings.simulation, let look = simulation.look else { return input }
+        var image = input
+        if settings.colorAmount > 0 {
+            let styled: CIImage
+            switch look {
+            case .photoEffect(let filter): styled = input.applyingFilter(filter)
+            case .cube(let lut, let encoding): styled = lut.apply(to: input, encoding: encoding)
             }
-            
-            let components = trimmed.components(separatedBy: .whitespaces).filter { !$0.isEmpty }
-            let values = components.compactMap { Float32($0) }
-            
-            if values.count == 3 {
-                cubeData.append(contentsOf: values)
-                cubeData.append(1.0) // 补全 Alpha 通道
+            if settings.colorAmount == 1 {
+                image = styled
+            } else {
+                let blend = CIFilter.blendWithAlphaMask()
+                blend.inputImage = styled
+                blend.backgroundImage = input
+                blend.maskImage = CIImage(color: CIColor(red: 0, green: 0, blue: 0, alpha: CGFloat(settings.colorAmount)))
+                    .cropped(to: input.extent)
+                image = blend.outputImage ?? input
             }
         }
-        
-        let expectedCount = dimension * dimension * dimension * 4
-        guard dimension > 0 && cubeData.count == expectedCount else {
-            print("❌ LUT 数据校验失败：\(url.lastPathComponent)")
+
+        guard settings.grainAmount > 0, let grain = simulation.grain else { return image }
+        let shortEdge = min(image.extent.width, image.extent.height)
+        let size = max(1, Float(shortEdge) * grain.size)
+        let offset = CIVector(x: CGFloat(grainSeed & 0xffff), y: CGFloat(grainSeed >> 16))
+        return grainKernel?.apply(extent: image.extent, arguments: [
+            image, size, grain.amplitude * settings.grainAmount, grain.chroma, offset
+        ]) ?? image
+    }
+
+    static let grainKernel: CIColorKernel? = {
+        let log = Logger(subsystem: "com.bettercam", category: "FilmEngine")
+        guard let url = Bundle.main.url(forResource: "default", withExtension: "metallib") else {
+            log.fault("default.metallib is missing; grain is disabled")
+            assertionFailure("default.metallib is missing")
             return nil
         }
-        
-        return (Data(bytes: cubeData, count: cubeData.count * 4), dimension)
-    }
-
-    // 💡 持久化：保存到磁盘
-    func saveCustomLUTToDisk(data: Data, name: String, dimension: Int) {
-        let fileManager = FileManager.default
-        guard let docDir = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first else { return }
-        
-        let fileName = "\(name).lutdata"
-        let fileURL = docDir.appendingPathComponent(fileName)
-        
         do {
-            try data.write(to: fileURL)
-            
-            // 存入内存
-            let newSim = FilmSimulation(name: name, type: .lut, filterName: nil, lutData: data, dimension: dimension, isFilm: false)
-            DispatchQueue.main.async {
-                if !self.availableSimulations.contains(where: { $0.name == name }) {
-                    self.availableSimulations.append(newSim)
-                }
-            }
-            
-            // 存入索引到 UserDefaults
-            var savedList = UserDefaults.standard.array(forKey: "UserSavedLUTs") as? [[String: Any]] ?? []
-            let metadata: [String: Any] = ["name": name, "dimension": dimension, "fileName": fileName]
-            savedList.append(metadata)
-            UserDefaults.standard.set(savedList, forKey: "UserSavedLUTs")
-            
-            availableSimulations.append(newSim)
-            
+            let library = try Data(contentsOf: url)
+            return try CIColorKernel(functionName: "betterCamGrain", fromMetalLibraryData: library)
         } catch {
-            print("❌ 存储失败: \(error)")
+            log.fault("Grain kernel failed to load: \(error, privacy: .public)")
+            assertionFailure("Grain kernel failed to load: \(error)")
+            return nil
         }
-    }
-
-    // 💡 持久化：从磁盘加载
-    private func loadSavedCustomLUTs() {
-        let fileManager = FileManager.default
-        guard let docDir = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first,
-              let savedList = UserDefaults.standard.array(forKey: "UserSavedLUTs") as? [[String: Any]] else { return }
-        
-        for item in savedList {
-            guard let name = item["name"] as? String,
-                  let dimension = item["dimension"] as? Int,
-                  let fileName = item["fileName"] as? String else { continue }
-            
-            let fileURL = docDir.appendingPathComponent(fileName)
-            if let data = try? Data(contentsOf: fileURL) {
-                let sim = FilmSimulation(name: name, type: .lut, filterName: nil, lutData: data, dimension: dimension, isFilm: false)
-                self.availableSimulations.append(sim)
-            }
-        }
-    }
-    
-    // 在 FilmEngine 类中添加
-    func deleteSimulation(named name: String) {
-        // 1. 从内存中移除对象
-        availableSimulations.removeAll { $0.name == name }
-        
-        // 2. 物理删除 Documents 目录下的文件
-        let fileManager = FileManager.default
-        if let docDir = fileManager.urls(for: .documentDirectory, in: .userDomainMask).first {
-            let fileURL = docDir.appendingPathComponent("\(name).cube")
-            try? fileManager.removeItem(at: fileURL)
-        }
-        
-        // 3. 更新持久化列表
-        var savedList = UserDefaults.standard.array(forKey: "UserSavedLUTs") as? [[String: Any]] ?? []
-        savedList.removeAll { ($0["name"] as? String) == name }
-        UserDefaults.standard.set(savedList, forKey: "UserSavedLUTs")
-    }
-
-    func renameSimulation(oldName: String, newName: String) {
-        // 1. 更新内存数组中的名字
-        if let index = availableSimulations.firstIndex(where: { $0.name == oldName }) {
-            availableSimulations[index].name = newName
-        }
-        
-        // 2. 更新 UserDefaults
-        var savedList = UserDefaults.standard.array(forKey: "UserSavedLUTs") as? [[String: Any]] ?? []
-        if let index = savedList.firstIndex(where: { ($0["name"] as? String) == oldName }) {
-            savedList[index]["name"] = newName
-            UserDefaults.standard.set(savedList, forKey: "UserSavedLUTs")
-        }
-    }
+    }()
 }

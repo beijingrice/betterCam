@@ -1,146 +1,78 @@
-//
-//  ContentView.swift
-//  betterCam
-//
-//  Created by Rice on 2026/1/22.
-//
-
 import SwiftUI
-import UIKit
 
 struct ContentView: View {
-    @Environment(\.scenePhase) var scenePhase
-    @StateObject var camera = Camera()
+    @ObservedObject var camera: Camera
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var showsCamera: Bool { camera.inCameraView && !camera.isShowingMenu }
+    private var pageAnimation: Animation { .easeInOut(duration: reduceMotion ? 0.15 : 0.24) }
+    private var panelTransition: AnyTransition {
+        reduceMotion ? .opacity : .opacity.combined(with: .offset(y: 8))
+    }
+
     var body: some View {
-        ZStack {
-            // for debug
-            BodyFrameBackground()
-            HStack(spacing: 0) {
-                VStack(spacing: 0) {
-                    ScreenView()
-                        .wrapInCameraFrame(thickness: 20)
-                        .recessedPanel()
-                        .padding(.top)
-                        .frame(height: UIScreen.main.bounds.height * 0.95)
-                    
+        LandscapeWorkspace { size, turns, display in
+            ZStack {
+                if camera.isShowingMenu {
+                    MenuView(camera: camera)
+                        .transition(panelTransition)
+                        .zIndex(1)
+                } else if !camera.inCameraView {
+                    LUTManagerView(camera: camera)
+                        .transition(panelTransition)
+                        .zIndex(1)
+                } else {
+                    cameraBody(size: size, turns: turns, display: display)
+                        .transition(.opacity)
                 }
-                ControlDialView()
-                    .padding(.leading, UIScreen.main.bounds.width * 0.1)
             }
-            .statusBar(hidden: true)
-            .environmentObject(camera)
-            if camera.isShowingTutorial {
-                TutorialOverlay(camera: camera)
-                    .transition(.opacity)
-                    .zIndex(99) // 确保在最上层
+            .animation(pageAnimation, value: showsCamera)
+        }
+        .background {
+            ZStack {
+                Color.black
+                if showsCamera {
+                    BodyFrameBackground().transition(.opacity).zIndex(1)
+                }
             }
+            .ignoresSafeArea()
+            .animation(pageAnimation, value: showsCamera)
+        }
+        .statusBar(hidden: true)
+        .onChange(of: camera.isShowingTutorial) { _, isShowing in
+            if !isShowing { camera.startCamera() }
         }
         .environmentObject(camera)
-        .environmentObject(camera.parameterManager) // 💡 必须加上
+        .environmentObject(camera.parameterManager)
         .environmentObject(camera.lensManager)
-        .onChange(of: camera.isShowingTutorial) {
-            isShowing in
-            if !isShowing {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    camera.callAllStartupFuncs()
-                }
-            }
-        }
-        .onChange(of: scenePhase) {
-            // 💡 直接用外层的变量，不需要写 "newPhase in"
-            if scenePhase == .background {
-                camera.parameterManager.saveExposureParameters()
-            }
-        }
-        .fullScreenCover(isPresented: Binding(
-            get: { !camera.inCameraView }, // 如果不在相机视图，就显示管理页面
-            set: { if $0 == false { camera.inCameraView = true } }
-        )) {
-            LUTManagerView(camera: camera)
-                .environmentObject(camera.parameterManager) // 💡 必须加上这句！
-                .environmentObject(camera.lensManager)
-        }
-        .fullScreenCover(isPresented: Binding(
-            get: {camera.isShowingMenu},
-            set: { if $0 == true { camera.isShowingMenu = false }} )) {
-                MenuView(camera: camera)
-                    .environmentObject(camera.parameterManager) // 💡 必须加上这句！
-                    .environmentObject(camera.lensManager)
-            }
     }
-}
 
-
-struct ContentViewPortrait: View {
-    @StateObject var camera = Camera()
-    var body: some View {
-        GeometryReader { geo in
-            
-            let landscapeWidth = geo.size.height
-            let landscapeHeight = geo.size.width
-            
-            ZStack {
-                BodyFrameBackground()
-                HStack(spacing: 0) {
-                    VStack(spacing: 0) {
-                        ScreenView()
-                            .wrapInCameraFrame(thickness: 20)
-                            .recessedPanel()
-                            .frame(height: landscapeHeight * 0.90)
-                        
-                    }
-                    ControlDialView()
-                        .padding(.leading, landscapeWidth * 0.1)
-                }
-                .frame(width: landscapeWidth, height: landscapeHeight)
-                .rotationEffect(.degrees(90))
-                .offset(x: (geo.size.width - landscapeWidth) / 2,
-                            y: 0)
-                .statusBar(hidden: true)
-                .environmentObject(camera)
-                // FOR DEBUG, camera.isShowingTutorial
-                if camera.isShowingTutorial {
-                    TutorialOverlay(camera: camera)
-                        //.frame(width: landscapeWidth, height: landscapeHeight)
-                        //.ignoresSafeArea()
-                        //.rotationEffect(.degrees(90))
-                        //.offset(x: (geo.size.width - landscapeWidth) / 2,y: 0)
-                        .transition(.opacity)
-                        .zIndex(99) // 确保在最上层
-                }
-            }   // START OF PROPERTIES
-            .environmentObject(camera)
-            .environmentObject(camera.parameterManager) // 💡 必须加上
-            .environmentObject(camera.lensManager)
-            .onChange(of: camera.isShowingTutorial) {
-                isShowing in
-                if !isShowing {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                        camera.callAllStartupFuncs()
+    private func cameraBody(size: CGSize, turns: Int, display: CameraDisplay) -> some View {
+        let sideMargin = display.sideMargin
+        let verticalMargin: CGFloat = 8
+        let bezel: CGFloat = 8
+        let gripGap = min(32, size.width * 0.035)
+        let dialSize = min(140, max(96, size.width * 0.16))
+        let lcdWidth = max(0, min(size.width - 2 * (sideMargin + bezel) - gripGap - dialSize,
+                                  (size.height - 2 * (verticalMargin + bezel)) * 4 / 3))
+        let bodyWidth = lcdWidth + 2 * bezel + gripGap + dialSize
+        let gripOffset: CGFloat = display == .phone && turns != 0
+            ? min(8, max(0, (size.width - bodyWidth) / 2 - 4))
+            : display.gripOffset
+        return HStack(alignment: .center, spacing: gripGap) {
+            ScreenView()
+                .allowsHitTesting(!camera.isShowingTutorial)
+                .overlay {
+                    if camera.isShowingTutorial {
+                        TutorialOverlay(camera: camera)
                     }
                 }
-            }
-            .fullScreenCover(isPresented: Binding(
-                get: { !camera.inCameraView }, // 如果不在相机视图，就显示管理页面
-                set: { if $0 == false { camera.inCameraView = true } }
-            )) {
-                LUTManagerView(camera: camera)
-                    .environmentObject(camera.parameterManager) // 💡 必须加上这句！
-                    .environmentObject(camera.lensManager)
-            }
-            .fullScreenCover(isPresented: Binding(
-                get: {camera.isShowingMenu},
-                set: { if $0 == true { camera.isShowingMenu = false }} )) {
-                    MenuView(camera: camera)
-                        .environmentObject(camera.parameterManager) // 💡 必须加上这句！
-                        .environmentObject(camera.lensManager)
-                }
-            // END OF PROPERTIES
+                .frame(width: lcdWidth, height: lcdWidth * 3 / 4)
+                .wrapInCameraFrame(thickness: bezel)
+                .recessedPanel()
+            ControlDialView(dialSize: dialSize, verticalSpacing: min(60, max(8, size.height - 2 * verticalMargin - dialSize - 70)))
+                .allowsHitTesting(!camera.isShowingTutorial)
+                .offset(x: gripOffset)
         }
-        
     }
-}
-
-#Preview {
-    ContentView()
 }

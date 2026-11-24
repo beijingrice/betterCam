@@ -15,6 +15,8 @@ struct Lens {
     var availableISOoptions: [String]
     var maxISO: Float
     var minISO: Float
+    var maxExposureDuration: CMTime
+    var minExposureDuration: CMTime
     var displayName: String?
     
     init(device: AVCaptureDevice) {
@@ -23,7 +25,9 @@ struct Lens {
         self.equivalentFocalLength = Lens.getFocalLength(device: device)
         self.availableSSoptions = ParameterAvailable.SSoptions.supportedSS(for: device)
         self.availableISOoptions = ParameterAvailable.ISOoptions.supportedISO(for: device)
-        let numericISOs = self.availableISOoptions.compactMap { Float($0) }
+        self.minExposureDuration = device.activeFormat.minExposureDuration
+        self.maxExposureDuration = device.activeFormat.maxExposureDuration
+        let numericISOs = self.availableISOoptions.compactMap { ExposureParameter.isoValue($0) }
         self.minISO = numericISOs.min() ?? device.activeFormat.minISO
         self.maxISO = numericISOs.max() ?? device.activeFormat.maxISO
         print("minISO\(self.minISO) maxISO\(self.maxISO)")
@@ -33,23 +37,18 @@ struct Lens {
     mutating func refreshCapabilities() {
         self.availableSSoptions = ParameterAvailable.SSoptions.supportedSS(for: device)
         self.availableISOoptions = ParameterAvailable.ISOoptions.supportedISO(for: device)
+        self.minExposureDuration = device.activeFormat.minExposureDuration
+        self.maxExposureDuration = device.activeFormat.maxExposureDuration
         
-        let numericISOs = self.availableISOoptions.compactMap { Float($0) }
+        let numericISOs = self.availableISOoptions.compactMap { ExposureParameter.isoValue($0) }
         self.minISO = numericISOs.min() ?? device.activeFormat.minISO
         self.maxISO = numericISOs.max() ?? device.activeFormat.maxISO
         print("✅ Lens 已刷新极限: \(self.minISO) ~ \(self.maxISO)")
     }
     
     static func getAperture(device: AVCaptureDevice) -> String {
-        do {
-            try device.lockForConfiguration()
-            let aperture = device.lensAperture
-            let finalAperture = aperture > 0 ? aperture : (device.lensAperture > 0 ? device.lensAperture: 1.8)
-            return String(format: "F%.1f", finalAperture)
-        } catch {
-            print("Error when fetching aperture!")
-        }
-        return "F1.8"
+        let aperture = device.lensAperture
+        return String(format: "F%.1f", aperture > 0 ? aperture : 1.8)
     }
     
     static func getFocalLength(device: AVCaptureDevice) -> Int {

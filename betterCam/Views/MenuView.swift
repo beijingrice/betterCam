@@ -161,12 +161,70 @@ struct MenuView: View {
             HStack(spacing: 0) {
                 SegmentedButton(title: ENABLE, isSelected: pm.isPureRawEngineEnabled) {
                     pm.isPureRawEngineEnabled = true
+                    pm.photoResolutionMode = .standard
                 }
                 SegmentedButton(title: DISABLE, isSelected: !pm.isPureRawEngineEnabled) {
                     pm.isPureRawEngineEnabled = false
                 }
             }
             .background(Color.white.opacity(0.1)).cornerRadius(roundedCornerRadius)
+        }
+    }
+
+    private var photoResolutionSection: some View {
+        VStack(alignment: .leading, spacing: innerSpacing) {
+            Text("Photo Resolution")
+                .font(.caption.bold()).foregroundColor(.gray)
+
+            HStack(spacing: 0) {
+                SegmentedButton(
+                    title: camera.is24MPSupported ? PhotoResolutionMode.standard.rawValue : "24MP N/A",
+                    isSelected: pm.photoResolutionMode == .standard,
+                    isDisabled: !camera.is24MPSupported
+                ) {
+                    haptic(.medium)
+                    pm.photoResolutionMode = .standard
+                }
+
+                SegmentedButton(
+                    title: camera.is48MPSupported ? PhotoResolutionMode.high48MP.rawValue : "48MP N/A",
+                    isSelected: pm.photoResolutionMode == .high48MP,
+                    isDisabled: !camera.is48MPSupported
+                ) {
+                    haptic(.medium)
+                    pm.photoResolutionMode = .high48MP
+                }
+            }
+            .background(Color.white.opacity(0.1))
+            .cornerRadius(roundedCornerRadius)
+
+            Text("24MP and 48MP apply to processed photos. RAW formats use a sensor-supported RAW resolution. Apple ProRAW is automatically disabled on unsupported devices.")
+                .font(.caption2)
+                .foregroundColor(.gray)
+
+        }
+    }
+
+    private var imageQualitySection: some View {
+        VStack(alignment: .leading, spacing: innerSpacing) {
+            Text("Image Quality")
+                .font(.caption.bold())
+                .foregroundColor(.gray)
+
+            HStack(spacing: 0) {
+                ForEach(pm.imageQualityOptions, id: \.self) { option in
+                    SegmentedButton(
+                        title: option,
+                        isSelected: pm.imageQuality == option,
+                        isDisabled: option == "ProRAW" && !camera.isProRAWSupported
+                    ) {
+                        haptic(.medium)
+                        pm.imageQuality = option
+                    }
+                }
+            }
+            .background(Color.white.opacity(0.1))
+            .cornerRadius(roundedCornerRadius)
         }
     }
     
@@ -221,7 +279,7 @@ struct MenuView: View {
     }
     
     var body: some View {
-        GeometryReader { geometry in
+        ZStack {
             Color.black
                 .ignoresSafeArea()
             ZStack {
@@ -251,6 +309,10 @@ struct MenuView: View {
                         saveSSandISOsection
                         
                         preferAUTOsection
+
+                        imageQualitySection
+
+                        photoResolutionSection
                         
                         zeroProcessingSection
                         
@@ -268,12 +330,6 @@ struct MenuView: View {
                 }
             }
             .statusBar(hidden: true)
-            .rotationEffect(.degrees(90))
-            // 2. 关键：旋转后，由于是在 Portrait 容器里，
-            // 我们需要手动把宽度设为屏幕的高度，高度设为屏幕的宽度
-            .frame(width: geometry.size.height, height: geometry.size.width)
-            // 3. 将视图居中对齐
-            .position(x: geometry.size.width / 2, y: geometry.size.height / 2)
             .alert("Oh, yeah! You have already donated me! Thank you!", isPresented: $showRestoredMsg) {
                 Button("OK", role: .cancel) {}
             }
@@ -283,17 +339,9 @@ struct MenuView: View {
         }
     }
     
-    // 💡 修正 3：强制关闭菜单
     private func dismissMenu() {
-        // 第一优先级：物理震动（即使主线程接下来被硬件锁死，震动也该已经发出）
         haptic(.medium)
-        
-        // 第二优先级：UI 消失动画
-        // 通过 withAnimation 立即标记 camera.isShowingMenu = false
-        // 这会让 SwiftUI 准备卸载 MenuView 视图
-        withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
-            camera.isShowingMenu = false
-        }
+        camera.isShowingMenu = false
     }
     
     private func haptic(_ style: UIImpactFeedbackGenerator.FeedbackStyle) {
