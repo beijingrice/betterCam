@@ -391,17 +391,15 @@ class SessionManager: NSObject {
 
         let formattedOffset = String(format: "%+.1f", displayValue)
         DispatchQueue.main.async { [weak self] in
-            guard let self, let camera = self.delegate, self.isMeterActive,
+            // Check the dials as they are now, not the meter flag: that only flips after the
+            // exposure update's debounce, so a reading queued just before switching to
+            // auto used to overwrite the 0.0 compensation and stick.
+            guard let self, let camera = self.delegate, camera.isManualExposureActive,
                   camera.parameterManager.EV != formattedOffset else { return }
             camera.parameterManager.EV = formattedOffset
         }
     }
 
-    private var isMeterActive: Bool {
-        meterLock.lock()
-        defer { meterLock.unlock() }
-        return meterIsActive
-    }
     
     func HDRswitch(_ mode: Bool, device: AVCaptureDevice) {
         sessionQueue.async {
