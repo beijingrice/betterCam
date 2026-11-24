@@ -13,20 +13,10 @@ struct ParameterItem: View {
     var badge: CaptureMode.Badge? = nil
     @EnvironmentObject var camera: Camera
 
-    private var isActive: Bool { camera.activeIndex == index }
-
     var body: some View {
-        Text(title)
-            .lineLimit(1)
-            .minimumScaleFactor(0.65)
-            // The badge hangs off the top-right corner without taking layout width, so the
-            // word itself never moves or rescales when the badge comes and goes.
-            .overlay(alignment: .topTrailing) {
-                if let badge { badgeLabel(badge).alignmentGuide(.trailing) { $0[.leading] } }
-            }
+        ParameterLabel(title: title, badge: badge, isActive: camera.activeIndex == index)
             .frame(maxWidth: .infinity)
             .frame(height: 40)
-            .foregroundColor(camera.activeIndex == index ? .black : .white)
             .background(camera.activeIndex == index
                         ? Color.white.opacity(camera.isAdjustingValue ? 0.7 : 0.5) : Color.clear)
             .contentShape(Rectangle())
@@ -34,11 +24,36 @@ struct ParameterItem: View {
                 camera.activeIndex = index
                 camera.isAdjustingValue = false
             }
+    }
+}
+
+/// A top-bar label with an optional half-width badge after its top-right corner.
+struct ParameterLabel: View {
+    let title: String
+    var badge: CaptureMode.Badge? = nil
+    var isActive = false
+
+    var body: some View {
+        Text(title)
+            .lineLimit(1)
+            .minimumScaleFactor(0.65)
+            // A zero-width frame pinned to the word's trailing edge holds the badge, which
+            // spills to the right of it. The word keeps its width and position, and the
+            // badge never sits on top of the last letter.
+            .overlay(alignment: .topTrailing) {
+                if let badge {
+                    badgeText(badge)
+                        .fixedSize()
+                        .padding(.leading, 1)
+                        .frame(width: 0, alignment: .leading)
+                }
+            }
+            .foregroundColor(isActive ? .black : .white)
             .accessibilityElement(children: .combine)
             .accessibilityValue(badge.map(accessibilityName) ?? "")
     }
 
-    private func badgeLabel(_ badge: CaptureMode.Badge) -> some View {
+    private func badgeText(_ badge: CaptureMode.Badge) -> some View {
         let text: String
         let color: Color
         switch badge {

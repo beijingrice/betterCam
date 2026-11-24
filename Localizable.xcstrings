@@ -21,9 +21,6 @@
         }
       }
     },
-    "24MP and 48MP apply to processed photos. RAW formats use a sensor-supported RAW resolution. Apple ProRAW is automatically disabled on unsupported devices." : {
-
-    },
     "A style with that name already exists." : {
       "localizations" : {
         "ja" : {
@@ -340,9 +337,6 @@
         }
       }
     },
-    "Image Quality" : {
-
-    },
     "Import New LUT (.cube)" : {
       "localizations" : {
         "ja" : {
@@ -617,9 +611,6 @@
           }
         }
       }
-    },
-    "Photo Resolution" : {
-
     },
     "Physical Control:" : {
       "localizations" : {
