@@ -228,44 +228,58 @@ struct MenuView: View {
         }
     }
     
-    private var moneyONEGAIsection: some View {
-        VStack(alignment: .leading, spacing: innerSpacing) {
-            Text("Buy me a cup of coffee")
-                .font(.caption.bold()).foregroundColor(.gray)
-            Button(action: {
-                haptic(.light)
-                print("Tapped purchase button!")
-                Task {
-                    let success = await storeManager.purchase()
-                    print("Created the task!")
-                    if success {
-                        haptic(.heavy)
-                        showThanksAlert = true
-                        camera.doneTheTip = true
-                        print("Purchase done!")
-                    }
-                }
-            }) {
-                HStack {
+    private var supportButton: some View {
+        Button {
+            haptic(.light)
+            Task {
+                guard await storeManager.purchase() else { return }
+                haptic(.heavy)
+                showThanksAlert = true
+                camera.doneTheTip = true
+            }
+        } label: {
+            HStack(spacing: 12) {
+                Group {
                     if storeManager.isPurchasing {
                         ProgressView().tint(.yellow)
                     } else {
                         Image(systemName: "cup.and.saucer.fill")
+                            .accessibilityHidden(true)
                     }
-                    Text("Buy me a cup of coffee!")
-                        .font(.system(size: 14, weight: .bold, design: .monospaced))
-                    Spacer()
                 }
-                .padding()
-                .background(Color.yellow.opacity(0.15))
-                .foregroundColor(.yellow)
-                .cornerRadius(10)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(Color.yellow.opacity(0.4), lineWidth: 1)
-                )
+                .frame(width: 24)
+                .foregroundStyle(.yellow)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Support betterCam")
+                        .font(.system(.subheadline, design: .monospaced).weight(.semibold))
+                        .foregroundStyle(.yellow)
+                    Text("Buy me a cup of coffee")
+                        .font(.caption)
+                        .foregroundStyle(.white.opacity(0.72))
+                }
+                .fixedSize(horizontal: false, vertical: true)
+
+                Spacer(minLength: 0)
+
+                if let product = storeManager.products.first {
+                    Text(product.displayPrice)
+                        .font(.system(.caption, design: .monospaced))
+                        .foregroundStyle(.yellow)
+                }
             }
+            .padding(12)
+            .frame(minHeight: 44)
+            .background(Color.yellow.opacity(0.12), in: RoundedRectangle(cornerRadius: roundedCornerRadius))
+            .overlay {
+                RoundedRectangle(cornerRadius: roundedCornerRadius)
+                    .strokeBorder(Color.yellow.opacity(0.3))
+                    .allowsHitTesting(false)
+            }
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .disabled(storeManager.isPurchasing)
     }
     
     private var cancelButton: some View {
@@ -297,6 +311,10 @@ struct MenuView: View {
                             }
                             headerSection
                         }
+
+                        if !camera.doneTheTip {
+                            supportButton
+                        }
                         
                         // 3. 波形图开关
                         // MenuView.swift 中的波形图部分
@@ -315,10 +333,6 @@ struct MenuView: View {
                         photoResolutionSection
                         
                         zeroProcessingSection
-                        
-                        if !camera.doneTheTip {
-                            moneyONEGAIsection // かわいいからお金お願いします〜
-                        }
                         
                         Spacer()
                         

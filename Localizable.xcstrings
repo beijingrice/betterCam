@@ -92,6 +92,7 @@
       }
     },
     "Buy me a cup of coffee!" : {
+      "extractionState" : "stale",
       "localizations" : {
         "ja" : {
           "stringUnit" : {
@@ -862,6 +863,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "开始拍摄"
+          }
+        }
+      }
+    },
+    "Support betterCam" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "betterCam を応援する"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "支持 betterCam"
           }
         }
       }
