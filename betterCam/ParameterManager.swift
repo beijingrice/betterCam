@@ -15,7 +15,7 @@ class ParameterManager: ObservableObject {
     @Published var SS: String = "1/200"
     @Published var ISO: String = "100"
     @Published var EV: String = "0.0"
-    @Published var style: String = "STD"
+    @Published var style: String = FilmEngine.standardName
     @Published var imageQuality: String = "JPEG"
     @Published var AFMode: String = "AF-C"
     @Published var WBMode: String = "AWB"
@@ -64,9 +64,12 @@ class ParameterManager: ObservableObject {
     }
     
     func syncAllLUTsToOptions() {
-        let names = FilmEngine.shared.availableSimulations.map(\.name) + ["MANAGE"]
-        var seen = Set<String>()
-        styleOptions = names.filter { seen.insert($0).inserted }
+        styleOptions = FilmEngine.shared.availableSimulations.map(\.name) + [FilmEngine.manageName]
+        if !styleOptions.contains(style) { style = FilmEngine.standardName }
+    }
+
+    static func savesJPEG(quality: String) -> Bool {
+        quality == "JPEG" || quality == "DNG+J"
     }
         
     // 💡 3. 参数持久化逻辑

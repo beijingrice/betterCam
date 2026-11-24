@@ -13,8 +13,6 @@ class Camera: NSObject, ObservableObject {
     var permissionManager = PermissionManager()
     var motionManager = MotionManager() // 💡 新加入的陀螺仪管家
     
-    @Published var currentPreviewImage: CGImage?
-    
     private var hasConfiguredSession = false
     private var cancellables = Set<AnyCancellable>()
     
@@ -42,11 +40,6 @@ class Camera: NSObject, ObservableObject {
     var isManualExposureActive: Bool {
         parameterManager.SS != ExposureParameter.auto &&
         parameterManager.ISO != ExposureParameter.auto
-    }
-    var shouldEnableVideoHDRForPreview: Bool {
-        !isManualExposureActive &&
-        !parameterManager.isPureRawEngineEnabled &&
-        parameterManager.imageQuality != "DNG"
     }
     var maxBufferCount: Int {
         parameterManager.photoResolutionMode == .high48MP ? 1 : 3
@@ -88,6 +81,7 @@ class Camera: NSObject, ObservableObject {
         bindLensSelection()
         bindExposureControls()
         bindCaptureSettings()
+        bindFilmLook()
         bindFocusAndSound()
     }
     
@@ -122,6 +116,7 @@ class Camera: NSObject, ObservableObject {
                 
                 // 2. 真正执行重负荷的底层硬件切换
                 self.sessionManager.switchInput(to: newLens.device)
+                self.updatePreviewHDR()
                 self.updateUIWithLens(newLens)
                 
                 // 3. 硬件准备好后，撤销模糊
@@ -143,11 +138,6 @@ class Camera: NSObject, ObservableObject {
                 guard let self, self.lensManager.currentLens != nil else { return }
                 self.sessionManager.updateExposure()
                 self.updatePreviewHDR()
-                self.sessionManager.preparePhotoPipeline(
-                    resolutionMode: self.parameterManager.photoResolutionMode,
-                    imageQuality: self.parameterManager.imageQuality,
-                    usesManualExposure: self.isManualExposureActive
-                )
             }
             .store(in: &cancellables)
         
@@ -167,6 +157,25 @@ class Camera: NSObject, ObservableObject {
     }
 
     private func bindCaptureSettings() {
+        // Keep the photo output prepared for whatever the next shot will be. Debounced so a
+        // chain of corrections (e.g. 48MP forcing JPEG) prepares only the final state.
+        Publishers.CombineLatest4(
+            parameterManager.$imageQuality,
+            parameterManager.$photoResolutionMode,
+            parameterManager.$isPureRawEngineEnabled,
+            Publishers.CombineLatest(parameterManager.$SS, parameterManager.$ISO)
+        )
+        .debounce(for: .milliseconds(150), scheduler: DispatchQueue.main)
+        .sink { [weak self] quality, resolution, pureRaw, exposure in
+            self?.sessionManager.preparePhotoPipeline(
+                resolutionMode: resolution,
+                imageQuality: quality,
+                usePureRawEngine: pureRaw,
+                usesManualExposure: exposure.0 != ExposureParameter.auto && exposure.1 != ExposureParameter.auto
+            )
+        }
+        .store(in: &cancellables)
+
         parameterManager.$imageQuality
             .sink { [weak self] q in
                 guard let self = self else { return }
@@ -176,17 +185,11 @@ class Camera: NSObject, ObservableObject {
                     return
                 }
 
-                self.updatePreviewHDR()
+                self.updatePreviewHDR(quality: q)
 
                 if self.parameterManager.photoResolutionMode == .high48MP,
                    q != "JPEG" && q != "ProRAW" {
                     self.parameterManager.photoResolutionMode = .standard
-                } else if self.parameterManager.photoResolutionMode == .high48MP {
-                    self.sessionManager.preparePhotoPipeline(
-                        resolutionMode: .high48MP,
-                        imageQuality: q,
-                        usesManualExposure: self.isManualExposureActive
-                    )
                 }
             }
             .store(in: &cancellables)
@@ -210,11 +213,6 @@ class Camera: NSObject, ObservableObject {
                     }
                 }
 
-                self.sessionManager.preparePhotoPipeline(
-                    resolutionMode: self.parameterManager.photoResolutionMode,
-                    imageQuality: self.parameterManager.imageQuality,
-                    usesManualExposure: self.isManualExposureActive
-                )
             }
             .store(in: &cancellables)
 
@@ -234,15 +232,41 @@ class Camera: NSObject, ObservableObject {
                     self.parameterManager.imageQuality = "DNG+J"
                 }
 
-                self.updatePreviewHDR()
+                self.updatePreviewHDR(usesRAWDeveloper: enabled)
             }
             .store(in: &cancellables)
             
     }
 
-    private func updatePreviewHDR() {
+    private func updatePreviewHDR(quality: String? = nil, usesRAWDeveloper: Bool? = nil) {
         guard let device = lensManager.currentLens?.device else { return }
-        sessionManager.HDRswitch(shouldEnableVideoHDRForPreview, device: device)
+        let enablesHDR = !isManualExposureActive &&
+            !(usesRAWDeveloper ?? parameterManager.isPureRawEngineEnabled) &&
+            ParameterManager.savesJPEG(quality: quality ?? parameterManager.imageQuality)
+        sessionManager.HDRswitch(enablesHDR, device: device)
+    }
+
+    private func bindFilmLook() {
+        let engine = FilmEngine.shared
+        let controls = Publishers.CombineLatest4(
+            parameterManager.$style, parameterManager.$imageQuality, $lutIntensity, $grainIntensity
+        )
+        Publishers.CombineLatest(controls, engine.$availableSimulations)
+            .sink { [weak self] update in
+                let ((style, quality, color, grain), simulations) = update
+                self?.sessionManager.previewFrames.update(look: FilmRenderSettings(
+                    style: simulations.first(where: { $0.name == style }),
+                    colorAmount: color, grainAmount: grain,
+                    appliesLook: ParameterManager.savesJPEG(quality: quality)
+                ))
+            }
+            .store(in: &cancellables)
+    }
+
+    var canAdjustFilmLook: Bool {
+        ParameterManager.savesJPEG(quality: parameterManager.imageQuality) &&
+        parameterManager.style != FilmEngine.standardName &&
+        parameterManager.style != FilmEngine.manageName
     }
 
     private func bindFocusAndSound() {
@@ -311,9 +335,10 @@ class Camera: NSObject, ObservableObject {
             resolutionMode: parameterManager.photoResolutionMode,
             isFrontCamera: lens.device.position == .front,
             usePureRawEngine: parameterManager.isPureRawEngineEnabled,
-            styleName: parameterManager.style,
-            lutIntensity: lutIntensity,
-            grainIntensity: grainIntensity,
+            look: FilmEngine.shared.settings(
+                styleName: parameterManager.style, colorAmount: lutIntensity, grainAmount: grainIntensity,
+                appliesLook: ParameterManager.savesJPEG(quality: parameterManager.imageQuality)
+            ),
             usesManualExposure: isManualExposureActive,
             manualExposureDuration: manualDuration,
             manualISO: manualISO

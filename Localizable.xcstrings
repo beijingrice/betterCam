@@ -24,6 +24,22 @@
     "24MP and 48MP apply to processed photos. RAW formats use a sensor-supported RAW resolution. Apple ProRAW is automatically disabled on unsupported devices." : {
 
     },
+    "A style with that name already exists." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "同じ名前のスタイルがあります。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "同名风格已存在。"
+          }
+        }
+      }
+    },
     "BetterCam" : {
 
     },
@@ -139,6 +155,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "将其更改为MANAGE并点击"
+          }
+        }
+      }
+    },
+    "Choose the color space this LUT was made for." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "このLUTの作成時に使用した色空間を選んでください。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请选择制作此 LUT 时使用的色彩空间。"
           }
         }
       }
@@ -407,6 +439,22 @@
         }
       }
     },
+    "Linear sRGB" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "リニア sRGB"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "线性 sRGB"
+          }
+        }
+      }
+    },
     "Look for STYLE parameter," : {
       "extractionState" : "stale",
       "localizations" : {
@@ -420,6 +468,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "找到STYLE参数，"
+          }
+        }
+      }
+    },
+    "LUT color space" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "LUTの色空間"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "LUT 色彩空间"
+          }
+        }
+      }
+    },
+    "LUT could not be updated" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "LUTを更新できませんでした"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法更新 LUT"
           }
         }
       }
@@ -505,6 +585,22 @@
         }
       }
     },
+    "Only standalone 3D .cube LUTs are supported." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "単独の3D .cube LUTのみ使用できます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仅支持独立的 3D .cube LUT。"
+          }
+        }
+      }
+    },
     "Permission Needed" : {
       "localizations" : {
         "ja" : {
@@ -541,6 +637,7 @@
       }
     },
     "Please enter a new name for this LUT." : {
+      "extractionState" : "stale",
       "localizations" : {
         "ja" : {
           "stringUnit" : {
@@ -750,6 +847,9 @@
         }
       }
     },
+    "sRGB" : {
+
+    },
     "Start Shooting" : {
       "localizations" : {
         "ja" : {
@@ -826,6 +926,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "谢谢你！"
+          }
+        }
+      }
+    },
+    "The file is not a valid 3D LUT." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有効な3D LUTファイルではありません。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此文件不是有效的 3D LUT。"
           }
         }
       }

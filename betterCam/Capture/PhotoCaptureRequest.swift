@@ -5,9 +5,7 @@ struct PhotoCaptureRequest {
     let resolutionMode: PhotoResolutionMode
     let isFrontCamera: Bool
     let usePureRawEngine: Bool
-    let styleName: String
-    let lutIntensity: Float
-    let grainIntensity: Float
+    let look: FilmRenderSettings
     let usesManualExposure: Bool
     let manualExposureDuration: CMTime?
     let manualISO: Float?

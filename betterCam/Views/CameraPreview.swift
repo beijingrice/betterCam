@@ -14,6 +14,8 @@ struct CameraPreview: View {
     @EnvironmentObject var camera: Camera
     @EnvironmentObject private var lensManager: LensManager
     @State private var lastDragLocation: CGPoint?
+    // Resets on its own when the system cancels the drag, which skips onEnded.
+    @GestureState private var isDraggingLook = false
     
     @State private var focusPoint: CGPoint?
     @State private var focusTimer: Timer?
@@ -49,17 +51,12 @@ struct CameraPreview: View {
         @ViewBuilder
     private func actualPreviewLayer(in size: CGSize) -> some View {
         ZStack {
-            // 1. 底层预览图
-            if let image = camera.currentPreviewImage {
-                Image(image, scale: 1.0, orientation: previewOrientation, label: Text("Preview"))
-                    .resizable()
-                    .scaledToFit()
-                    .blur(radius: camera.isSwitchingLens ? 30 : 0)
-                    .clipped()
-            } else {
-                Color.black
-            }
-            
+            MetalCameraPreview(
+                frames: camera.sessionManager.previewFrames,
+                orientation: previewOrientation, switchingLens: camera.isSwitchingLens
+            )
+            .allowsHitTesting(false)
+
             ZStack {
                 WaveformOverlay()
                 HistogramOverlay()
@@ -72,16 +69,21 @@ struct CameraPreview: View {
                 .contentShape(Rectangle())
                 .gesture(
                     DragGesture(minimumDistance: 5)
+                        .updating($isDraggingLook) { _, dragging, _ in dragging = true }
                         .onChanged { value in
                             handleDrag(value, in: size)
                         }
                         .onEnded { _ in
                             lastDragLocation = nil
+                            camera.sessionManager.previewFrames.setAdjustingGrain(false)
                             startHUDTimer()
                         }
                 )
                 .onTapGesture { location in
                     handleTapToFocus(at: location, in: size)
+                }
+                .onChange(of: isDraggingLook) { _, dragging in
+                    if !dragging { camera.sessionManager.previewFrames.setAdjustingGrain(false) }
                 }
             
             // 3. 数值反馈提示 (HUD)
@@ -144,6 +146,8 @@ struct CameraPreview: View {
 
     // 💡 手势核心算法
     private func handleDrag(_ value: DragGesture.Value, in size: CGSize) {
+        guard camera.canAdjustFilmLook, size.width > 0, size.height > 0 else { return }
+        camera.sessionManager.previewFrames.setAdjustingGrain(true)
         guard let lastLocation = lastDragLocation else {
             lastDragLocation = value.location
             return
@@ -178,10 +182,11 @@ struct CameraPreview: View {
     
 
     private func handleTapToFocus(at location: CGPoint, in size: CGSize) {
-        guard let image = camera.currentPreviewImage else { return }
+        guard let frame = camera.sessionManager.previewFrames.snapshot() else { return }
+        let extent = frame.image.extent
         let portrait = previewOrientation == .right || previewOrientation == .left
-        let imageSize = CGSize(width: CGFloat(portrait ? image.height : image.width),
-                               height: CGFloat(portrait ? image.width : image.height))
+        let imageSize = CGSize(width: portrait ? extent.height : extent.width,
+                               height: portrait ? extent.width : extent.height)
         let rect = AVMakeRect(aspectRatio: imageSize, insideRect: CGRect(origin: .zero, size: size))
         guard rect.contains(location), rect.width > 0, rect.height > 0 else { return }
         let x = (location.x - rect.minX) / rect.width
@@ -193,7 +198,7 @@ struct CameraPreview: View {
         case .down: cameraPoint = CGPoint(x: 1 - x, y: 1 - y)
         default: cameraPoint = CGPoint(x: x, y: y)
         }
-        if lensManager.currentLens?.device.position == .front {
+        if frame.mirrored {
             cameraPoint.y = 1 - cameraPoint.y // Undo the front preview's downMirrored transform.
         }
         focusPoint = location
