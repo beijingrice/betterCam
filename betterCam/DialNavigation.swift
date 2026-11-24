@@ -41,11 +41,9 @@ func adjustValue(for camera: Camera, direction: Int) {
         lm.switchLens(direction: direction)
         
     case UIWidgets.imageQuality.rawValue:
-        pm.imageQuality = nextOption(
-            in: camera.availableImageQualityOptions,
-            current: pm.imageQuality,
-            direction: direction
-        )
+        camera.selectCaptureMode(CaptureMode.next(
+            after: camera.currentCaptureMode, in: camera.availableCaptureModes, direction: direction
+        ))
         
     default:
         break

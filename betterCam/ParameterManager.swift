@@ -27,7 +27,6 @@ class ParameterManager: ObservableObject {
     @Published var actualSSoptions: [String] = []
     @Published var actualISOoptions: [String] = []
     @Published var styleOptions: [String] = []
-    let imageQualityOptions: [String] = ["DNG+J", "DNG", "ProRAW", "JPEG"]
     let AFModeOptions: [String] = ["AF-C", "AF-S"]
     let EVOptions: [String] = ParameterAvailable.EVoptions
         

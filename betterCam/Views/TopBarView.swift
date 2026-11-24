@@ -14,7 +14,13 @@ struct TopBarView: View {
     var body: some View {
         HStack (spacing: 0){
             Group {
-                ParameterItem(title: pm.imageQuality, index: UIWidgets.imageQuality.rawValue)
+                ParameterItem(
+                    title: pm.imageQuality, index: UIWidgets.imageQuality.rawValue,
+                    badge: CaptureMode.badge(
+                        quality: pm.imageQuality, resolution: pm.photoResolutionMode,
+                        zeroProcessing: pm.isPureRawEngineEnabled
+                    )
+                )
                 Spacer()
                 ParameterItem(title: lm.currentLens.map { $0.displayName ?? "\($0.equivalentFocalLength)mm" } ?? "-", index: UIWidgets.lensSwitch.rawValue)
                 Spacer()

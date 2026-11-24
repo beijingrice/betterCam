@@ -171,63 +171,6 @@ struct MenuView: View {
         }
     }
 
-    private var photoResolutionSection: some View {
-        VStack(alignment: .leading, spacing: innerSpacing) {
-            Text("Photo Resolution")
-                .font(.caption.bold()).foregroundColor(.gray)
-
-            HStack(spacing: 0) {
-                SegmentedButton(
-                    title: camera.is24MPSupported ? PhotoResolutionMode.standard.rawValue : "24MP N/A",
-                    isSelected: pm.photoResolutionMode == .standard,
-                    isDisabled: !camera.is24MPSupported
-                ) {
-                    haptic(.medium)
-                    pm.photoResolutionMode = .standard
-                }
-
-                SegmentedButton(
-                    title: camera.is48MPSupported ? PhotoResolutionMode.high48MP.rawValue : "48MP N/A",
-                    isSelected: pm.photoResolutionMode == .high48MP,
-                    isDisabled: !camera.is48MPSupported
-                ) {
-                    haptic(.medium)
-                    pm.photoResolutionMode = .high48MP
-                }
-            }
-            .background(Color.white.opacity(0.1))
-            .cornerRadius(roundedCornerRadius)
-
-            Text("24MP and 48MP apply to processed photos. RAW formats use a sensor-supported RAW resolution. Apple ProRAW is automatically disabled on unsupported devices.")
-                .font(.caption2)
-                .foregroundColor(.gray)
-
-        }
-    }
-
-    private var imageQualitySection: some View {
-        VStack(alignment: .leading, spacing: innerSpacing) {
-            Text("Image Quality")
-                .font(.caption.bold())
-                .foregroundColor(.gray)
-
-            HStack(spacing: 0) {
-                ForEach(pm.imageQualityOptions, id: \.self) { option in
-                    SegmentedButton(
-                        title: option,
-                        isSelected: pm.imageQuality == option,
-                        isDisabled: option == "ProRAW" && !camera.isProRAWSupported
-                    ) {
-                        haptic(.medium)
-                        pm.imageQuality = option
-                    }
-                }
-            }
-            .background(Color.white.opacity(0.1))
-            .cornerRadius(roundedCornerRadius)
-        }
-    }
-    
     private var supportButton: some View {
         Button {
             haptic(.light)
@@ -328,10 +271,6 @@ struct MenuView: View {
                         
                         preferAUTOsection
 
-                        imageQualitySection
-
-                        photoResolutionSection
-                        
                         zeroProcessingSection
                         
                         Spacer()

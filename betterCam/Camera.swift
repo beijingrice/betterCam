@@ -32,9 +32,26 @@ class Camera: NSObject, ObservableObject {
     @Published var is48MPSupported: Bool = false
     @Published var isProRAWSupported: Bool = false
     @Published var lastCaptureResolution: String?
-    var availableImageQualityOptions: [String] {
-        parameterManager.imageQualityOptions.filter {
-            $0 != "ProRAW" || isProRAWSupported
+    var availableCaptureModes: [CaptureMode] {
+        CaptureMode.available(
+            proRAWSupported: isProRAWSupported,
+            highResolutionSupported: is48MPSupported,
+            zeroProcessing: parameterManager.isPureRawEngineEnabled
+        )
+    }
+    var currentCaptureMode: CaptureMode {
+        CaptureMode(quality: parameterManager.imageQuality, resolution: parameterManager.photoResolutionMode)
+    }
+
+    func selectCaptureMode(_ mode: CaptureMode) {
+        // The quality and resolution observers correct each other's invalid pairs.
+        // Leave 48MP before switching to a RAW format, and pick the format before 48MP.
+        if mode.resolution == .high48MP {
+            parameterManager.imageQuality = mode.quality
+            parameterManager.photoResolutionMode = mode.resolution
+        } else {
+            parameterManager.photoResolutionMode = mode.resolution
+            parameterManager.imageQuality = mode.quality
         }
     }
     var isManualExposureActive: Bool {
@@ -167,7 +184,18 @@ class Camera: NSObject, ObservableObject {
         )
         .debounce(for: .milliseconds(150), scheduler: DispatchQueue.main)
         .sink { [weak self] quality, resolution, pureRaw, exposure in
-            self?.sessionManager.preparePhotoPipeline(
+            guard let self else { return }
+            // A saved state from an older version can pair ZERO PROCESSING with ProRAW or
+            // 48MP, which the dial no longer offers. The corrected value re-triggers this.
+            if pureRaw && quality == "ProRAW" {
+                self.parameterManager.imageQuality = "DNG+J"
+                return
+            }
+            if pureRaw && resolution == .high48MP {
+                self.parameterManager.photoResolutionMode = .standard
+                return
+            }
+            self.sessionManager.preparePhotoPipeline(
                 resolutionMode: resolution,
                 imageQuality: quality,
                 usePureRawEngine: pureRaw,
