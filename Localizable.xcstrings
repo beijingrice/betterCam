@@ -21,6 +21,22 @@
         }
       }
     },
+    "48-megapixel capture. Available with JPEG and ProRAW." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "4800万画素で撮影します。JPEG と ProRAW で使えます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "4800 万像素拍摄，适用于 JPEG 和 ProRAW。"
+          }
+        }
+      }
+    },
     "A style with that name already exists." : {
       "localizations" : {
         "ja" : {
@@ -125,6 +141,7 @@
       }
     },
     "Capture:" : {
+      "extractionState" : "stale",
       "localizations" : {
         "ja" : {
           "stringUnit" : {
@@ -186,6 +203,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "关闭"
+          }
+        }
+      }
+    },
+    "Color & grain" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "色とグレイン"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "色彩与颗粒"
           }
         }
       }
@@ -286,6 +319,22 @@
         }
       }
     },
+    "Format marks" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "フォーマットの表示"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "格式角标"
+          }
+        }
+      }
+    },
     "Front Camera" : {
       "localizations" : {
         "ja" : {
@@ -306,6 +355,7 @@
 
     },
     "Got it" : {
+      "extractionState" : "stale",
       "localizations" : {
         "ja" : {
           "stringUnit" : {
@@ -317,6 +367,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "明白了"
+          }
+        }
+      }
+    },
+    "Grain shows in the viewfinder only while you adjust it." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "グレインは調整している間だけファインダーに表示されます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "颗粒只在调整时显示在取景器里。"
           }
         }
       }
@@ -354,6 +420,7 @@
       }
     },
     "In bottom bar of camera screen:" : {
+      "extractionState" : "stale",
       "localizations" : {
         "ja" : {
           "stringUnit" : {
@@ -370,6 +437,7 @@
       }
     },
     "In camera screen:" : {
+      "extractionState" : "stale",
       "localizations" : {
         "ja" : {
           "stringUnit" : {
@@ -548,6 +616,22 @@
         }
       }
     },
+    "Next" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "次へ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下一步"
+          }
+        }
+      }
+    },
     "Oh, yeah! You have already donated me! Thank you!" : {
       "localizations" : {
         "ja" : {
@@ -613,6 +697,7 @@
       }
     },
     "Physical Control:" : {
+      "extractionState" : "stale",
       "localizations" : {
         "ja" : {
           "stringUnit" : {
@@ -662,6 +747,7 @@
       }
     },
     "Press center to select" : {
+      "extractionState" : "stale",
       "localizations" : {
         "ja" : {
           "stringUnit" : {
@@ -673,6 +759,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "按中键以选中"
+          }
+        }
+      }
+    },
+    "Press the center to select, then rotate to change it." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "中央を押して選び、回して値を変えます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按下中央选中，再转动来调整。"
           }
         }
       }
@@ -807,6 +909,22 @@
         }
       }
     },
+    "Select the format in the top bar, then rotate the dial to change it." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上部バーでフォーマットを選び、ダイヤルを回して切り替えます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选中顶栏的格式，转动拨盘即可切换。"
+          }
+        }
+      }
+    },
     "Settings" : {
       "localizations" : {
         "ja" : {
@@ -839,6 +957,22 @@
         }
       }
     },
+    "Skip" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "スキップ"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "跳过"
+          }
+        }
+      }
+    },
     "sRGB" : {
 
     },
@@ -854,6 +988,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "开始拍摄"
+          }
+        }
+      }
+    },
+    "Step %lld of %lld" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ステップ %1$lld / %2$lld"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "第 %1$lld 步，共 %2$lld 步"
           }
         }
       }
@@ -970,6 +1120,22 @@
         }
       }
     },
+    "Turn. Press. Shoot." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "回す。押す。撮る。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "转动，按下，拍摄。"
+          }
+        }
+      }
+    },
     "Usually it's STD when launched." : {
       "extractionState" : "stale",
       "localizations" : {
@@ -999,6 +1165,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "波形图"
+          }
+        }
+      }
+    },
+    "Your LUTs" : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "LUT の管理"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的 LUT"
+          }
+        }
+      }
+    },
+    "ZERO PROCESSING: the JPEG is developed from RAW without Apple's processing. Turn it on in MENU." : {
+      "localizations" : {
+        "ja" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "加工なしモード：Apple の画像処理を通さず、RAW から JPEG を現像します。MENU でオンにできます。"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "零处理模式：不经过 Apple 的图像处理，直接从 RAW 冲洗出 JPEG。可在 MENU 中开启。"
           }
         }
       }

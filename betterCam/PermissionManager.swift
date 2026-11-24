@@ -7,51 +7,52 @@
 
 import Foundation
 import AVFoundation
+import Combine
 import Photos
 
-class PermissionManager {
-    var cameraPermission: CameraPermissionStatus = .denied
-    var photoPermission: CameraPermissionStatus = .denied
+/// Camera and photo-library access. Published so the camera screen redraws the moment the
+/// user answers a prompt; it used to be a plain class, so a grant on first launch only
+/// showed up after the app was relaunched.
+final class PermissionManager: ObservableObject {
+    @Published private(set) var cameraPermission = PermissionManager.cameraStatus()
+    @Published private(set) var photoPermission = PermissionManager.photoStatus()
+
     var isFullyAuthorized: Bool {
-        return (cameraPermission == .authorized) && (photoPermission == .authorized)
+        cameraPermission == .authorized && photoPermission == .authorized
     }
-    
-    func checkPhotoLibraryPermission() {
-        let status = PHPhotoLibrary.authorizationStatus(for: .addOnly)
-        if status == .notDetermined {
-            PHPhotoLibrary.requestAuthorization(for: .addOnly) { _ in }
+
+    /// Asks for whatever is still undetermined, one prompt after the other, and returns
+    /// once both have answers.
+    func requestAll() async {
+        if AVCaptureDevice.authorizationStatus(for: .video) == .notDetermined {
+            _ = await AVCaptureDevice.requestAccess(for: .video)
         }
+        cameraPermission = Self.cameraStatus()
+        if PHPhotoLibrary.authorizationStatus(for: .addOnly) == .notDetermined {
+            _ = await PHPhotoLibrary.requestAuthorization(for: .addOnly)
+        }
+        photoPermission = Self.photoStatus()
     }
-    
-    func checkAllPermissions() {
-        // 1. 检查相机权限
-        let cameraStatus = AVCaptureDevice.authorizationStatus(for: .video)
-        handleCameraStatus(cameraStatus)
-        
-        // 2. 检查相册写入权限
-        let photoStatus = PHPhotoLibrary.authorizationStatus(for: .addOnly)
-        handlePhotoStatus(photoStatus)
+
+    /// Re-reads both statuses, e.g. after the user comes back from Settings.
+    func refresh() {
+        cameraPermission = Self.cameraStatus()
+        photoPermission = Self.photoStatus()
     }
-    
-    private func handleCameraStatus(_ status: AVAuthorizationStatus) {
-        switch status {
-        case .authorized: cameraPermission = .authorized
-        case .notDetermined:
-            AVCaptureDevice.requestAccess(for: .video) { granted in
-                DispatchQueue.main.async { self.cameraPermission = granted ? .authorized : .denied }
-            }
-        default: cameraPermission = .denied
+
+    private static func cameraStatus() -> CameraPermissionStatus {
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized: .authorized
+        case .notDetermined: .undetermined
+        default: .denied
         }
     }
 
-    private func handlePhotoStatus(_ status: PHAuthorizationStatus) {
-        switch status {
-        case .authorized, .limited: photoPermission = .authorized
-        case .notDetermined:
-            PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
-                DispatchQueue.main.async { self.photoPermission = (status == .authorized || status == .limited) ? .authorized : .denied }
-            }
-        default: photoPermission = .denied
+    private static func photoStatus() -> CameraPermissionStatus {
+        switch PHPhotoLibrary.authorizationStatus(for: .addOnly) {
+        case .authorized, .limited: .authorized
+        case .notDetermined: .undetermined
+        default: .denied
         }
     }
 }

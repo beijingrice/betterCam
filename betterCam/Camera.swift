@@ -14,6 +14,8 @@ class Camera: NSObject, ObservableObject {
     var motionManager = MotionManager() // 💡 新加入的陀螺仪管家
     
     private var hasConfiguredSession = false
+    /// The capture session is built only after camera access is granted.
+    private var hasStartedSession = false
     private var cancellables = Set<AnyCancellable>()
     
     // MARK: - UI 交互状态
@@ -63,6 +65,9 @@ class Camera: NSObject, ObservableObject {
     }
     @Published var isShowingMenu = false { didSet { manageSession() } }
     @Published var inCameraView: Bool = true { didSet { manageSession() } }
+    var isCameraScreenVisible: Bool { inCameraView && !isShowingMenu }
+    private var pendingSessionStop: DispatchWorkItem?
+    private let selectFeedback = UIImpactFeedbackGenerator(style: .heavy)
     @AppStorage("doneTheTip") var doneTheTip: Bool = false
     @AppStorage("hasCompletedTutorial") var hasCompletedTutorial: Bool = false
     @Published var isShowingTutorial: Bool = false
@@ -79,6 +84,19 @@ class Camera: NSObject, ObservableObject {
     override init() {
         super.init()
         sessionManager.delegate = self // pass camera instance to sessionManager
+
+        // Views read access state through the camera, so republish its changes.
+        permissionManager.objectWillChange
+            .sink { [weak self] _ in self?.objectWillChange.send() }
+            .store(in: &cancellables)
+        // Access granted in Settings while the app was in the background.
+        NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)
+            .sink { [weak self] _ in
+                guard let self, self.hasConfiguredSession else { return }
+                self.permissionManager.refresh()
+                self.startSessionIfAuthorized()
+            }
+            .store(in: &cancellables)
         
         if hasCompletedTutorial {
             startCamera()
@@ -103,10 +121,21 @@ class Camera: NSObject, ObservableObject {
     }
     
     private func configureInitialLens(_ lens: Lens) {
-        permissionManager.checkAllPermissions()
         hasConfiguredSession = true
-        sessionManager.initSession(with: lens)
         updateUIWithLens(lens)
+        // Building the session before access is granted left it without an input on a
+        // fresh install, and nothing rebuilt it after the prompt.
+        Task { @MainActor [weak self] in
+            await self?.permissionManager.requestAll()
+            self?.startSessionIfAuthorized()
+        }
+    }
+
+    private func startSessionIfAuthorized() {
+        guard !hasStartedSession, permissionManager.cameraPermission == .authorized,
+              let lens = lensManager.currentLens else { return }
+        hasStartedSession = true
+        sessionManager.initSession(with: lens)
     }
 
     private func bindLensSelection() {
@@ -341,7 +370,10 @@ class Camera: NSObject, ObservableObject {
     
     // MARK: - 交互操作
     func takePhoto() {
-        guard let lens = lensManager.currentLens, !isSensorBusy && inFlightPhotos < maxBufferCount && !isShowingTutorial else { return }
+        // The camera screen stays mounted under the menu, so its shutter controls still
+        // exist there; the session is stopped behind it.
+        guard let lens = lensManager.currentLens, !isSensorBusy && inFlightPhotos < maxBufferCount && !isShowingTutorial,
+              isCameraScreenVisible else { return }
         isSensorBusy = true
         inFlightPhotos += 1
 
@@ -376,7 +408,7 @@ class Camera: NSObject, ObservableObject {
             request: request
         )
         shutterSoundManager.play()
-        UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+        selectFeedback.impactOccurred()
     }
     
     func focus(at point: CGPoint) {
@@ -394,12 +426,21 @@ class Camera: NSObject, ObservableObject {
             if !isAdjustingValue { isAdjustingValue = true }
             else { isShowingMenu = true; isAdjustingValue = false }
         }
-        UIImpactFeedbackGenerator(style: .heavy).impactOccurred()
+        selectFeedback.impactOccurred()
     }
     
     func manageSession() {
         guard lensManager.currentLens != nil else { return }
-        if !inCameraView || isShowingMenu { sessionManager.stop() }
-        else { sessionManager.start() }
+        pendingSessionStop?.cancel()
+        pendingSessionStop = nil
+        if isCameraScreenVisible {
+            sessionManager.start()
+        } else {
+            // Powering the camera down mid-transition competes with the animation. Wait
+            // until it has finished; reopening the camera before then cancels the stop.
+            let stop = DispatchWorkItem { [weak self] in self?.sessionManager.stop() }
+            pendingSessionStop = stop
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: stop)
+        }
     }
 }

@@ -53,7 +53,8 @@ struct CameraPreview: View {
         ZStack {
             MetalCameraPreview(
                 frames: camera.sessionManager.previewFrames,
-                orientation: previewOrientation, switchingLens: camera.isSwitchingLens
+                orientation: previewOrientation, switchingLens: camera.isSwitchingLens,
+                paused: camera.isShowingMenu || !camera.inCameraView
             )
             .allowsHitTesting(false)
 
@@ -223,7 +224,7 @@ struct CaptureInteractionView: UIViewRepresentable {
         if #available(iOS 17.2, *) {
             let interaction = AVCaptureEventInteraction { event in
                 // 确保在拍照开始瞬间触发，且不在教学状态下
-                if event.phase == .began && !camera.isShowingTutorial {
+                if event.phase == .began && !camera.isShowingTutorial && camera.isCameraScreenVisible {
                     camera.takePhoto()
                     
                     // 提供物理反馈感

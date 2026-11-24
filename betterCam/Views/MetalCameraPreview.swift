@@ -72,6 +72,8 @@ struct MetalCameraPreview: UIViewRepresentable {
     let frames: CameraPreviewFrames
     let orientation: Image.Orientation
     let switchingLens: Bool
+    /// Hidden behind another screen: stop the display link instead of polling for frames.
+    var paused = false
 
     func makeCoordinator() -> Renderer { Renderer(frames: frames) }
 
@@ -91,6 +93,7 @@ struct MetalCameraPreview: UIViewRepresentable {
     func updateUIView(_ view: MTKView, context: Context) {
         context.coordinator.orientation = orientation.exifOrientation
         context.coordinator.switchingLens = switchingLens
+        view.isPaused = paused || context.coordinator.device == nil
     }
 
     static func dismantleUIView(_ view: MTKView, coordinator: Renderer) {

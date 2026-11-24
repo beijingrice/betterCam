@@ -13,6 +13,13 @@ struct ContentView: View {
     var body: some View {
         LandscapeWorkspace { size, turns, display in
             ZStack {
+                // The camera stays mounted under the menu and the LUT manager. Tearing it
+                // down rebuilt the Metal preview, its Core Image context and the hardware
+                // shutter interaction on every open and close, which hitched the transition.
+                cameraBody(size: size, turns: turns, display: display)
+                    .opacity(showsCamera ? 1 : 0)
+                    .allowsHitTesting(showsCamera)
+                    .accessibilityHidden(!showsCamera)
                 if camera.isShowingMenu {
                     MenuView(camera: camera)
                         .transition(panelTransition)
@@ -21,9 +28,6 @@ struct ContentView: View {
                     LUTManagerView(camera: camera)
                         .transition(panelTransition)
                         .zIndex(1)
-                } else {
-                    cameraBody(size: size, turns: turns, display: display)
-                        .transition(.opacity)
                 }
             }
             .animation(pageAnimation, value: showsCamera)
