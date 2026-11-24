@@ -19,6 +19,10 @@ struct KnurledDialView: View {
         if camera.activeIndex == UIWidgets.lensSwitch.rawValue {
             return 90.0
         }
+        // 75 steps of 100 K: a finer step keeps the whole range within a few turns.
+        if camera.isEditingCustomKelvin {
+            return 15.0
+        }
         return 45.0
     }
     

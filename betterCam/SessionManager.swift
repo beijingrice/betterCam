@@ -414,6 +414,89 @@ class SessionManager: NSObject {
         }
     }
         
+    // Session queue only. Bumped on every request so a custom-gains lock that completes
+    // after a newer request can tell it is stale.
+    private var whiteBalanceGeneration = 0
+    private var requestedWhiteBalanceKelvin: Int?
+    /// The latest request already reasserted by a stale lock, so a fast turn's many stale
+    /// completions reapply it once instead of once each.
+    private var reassertedWhiteBalanceGeneration = 0
+
+    /// Locks white balance to `kelvin` (tint 0), or returns to AWB when nil. Devices that
+    /// cannot lock custom gains (some front cameras) stay on AWB.
+    func updateWhiteBalance(kelvin: Int?, device: AVCaptureDevice) {
+        sessionQueue.async { [weak self] in
+            guard let self else { return }
+            self.whiteBalanceGeneration += 1
+            self.requestedWhiteBalanceKelvin = kelvin
+            self.applyRequestedWhiteBalance(to: device)
+        }
+    }
+
+    // Session queue only.
+    private func applyRequestedWhiteBalance(to device: AVCaptureDevice) {
+        let generation = whiteBalanceGeneration
+        do {
+            try device.lockForConfiguration()
+            defer { device.unlockForConfiguration() }
+            if let kelvin = requestedWhiteBalanceKelvin, device.isLockingWhiteBalanceWithCustomDeviceGainsSupported {
+                let target = AVCaptureDevice.WhiteBalanceTemperatureAndTintValues(
+                    temperature: Float(kelvin), tint: 0
+                )
+                let gains = WhiteBalance.clampedGains(
+                    device.deviceWhiteBalanceGains(for: target), maxGain: device.maxWhiteBalanceGain
+                )
+                // The gains land a frame or more later. If the dial moved on meanwhile
+                // (back to AWB, say), this late lock would override it, so reassert
+                // whatever is current.
+                device.setWhiteBalanceModeLocked(with: gains) { [weak self] _ in
+                    self?.sessionQueue.async {
+                        guard let self, self.whiteBalanceGeneration != generation,
+                              self.reassertedWhiteBalanceGeneration != self.whiteBalanceGeneration else { return }
+                        self.reassertedWhiteBalanceGeneration = self.whiteBalanceGeneration
+                        self.applyRequestedWhiteBalance(to: device)
+                    }
+                }
+            } else if device.isWhiteBalanceModeSupported(.continuousAutoWhiteBalance) {
+                // Setting a mode the device already reports does nothing, and after a
+                // custom-gains lock it may still report AWB. Pass through .locked so AWB
+                // always restarts.
+                if device.isWhiteBalanceModeSupported(.locked) { device.whiteBalanceMode = .locked }
+                device.whiteBalanceMode = .continuousAutoWhiteBalance
+            }
+        } catch { print("白平衡设置失败: \(error)") }
+        #if DEBUG
+        // Gains land a frame or more after the call, and AWB needs a moment to settle,
+        // so read once they should have.
+        sessionQueue.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+            guard let self, self.whiteBalanceGeneration == generation else { return }
+            self.logWhiteBalance(device, label: "after 1.5s", generation: generation)
+        }
+        #endif
+    }
+
+    #if DEBUG
+    /// What the device is really doing, in the same terms as the dial.
+    private func logWhiteBalance(_ device: AVCaptureDevice, label: String, generation: Int) {
+        let mode: String
+        switch device.whiteBalanceMode {
+        case .locked: mode = "locked"
+        case .autoWhiteBalance: mode = "auto(once)"
+        case .continuousAutoWhiteBalance: mode = "AWB"
+        @unknown default: mode = "unknown"
+        }
+        let gains = device.deviceWhiteBalanceGains
+        let normalized = WhiteBalance.clampedGains(gains, maxGain: device.maxWhiteBalanceGain)
+        let tt = device.temperatureAndTintValues(for: normalized)
+        let requested = requestedWhiteBalanceKelvin.map { "\($0)K" } ?? "AWB"
+        print(String(
+            format: "[WB #%d %@] requested %@ | device %@ | gains R%.2f G%.2f B%.2f | ≈ %.0fK tint %+.0f",
+            generation, label, requested, mode,
+            gains.redGain, gains.greenGain, gains.blueGain, tt.temperature, tt.tint
+        ))
+    }
+    #endif
+
     func focusModify(mode: AVCaptureDevice.FocusMode, device: AVCaptureDevice) {
         sessionQueue.async {
             do {
@@ -729,8 +812,15 @@ extension SessionManager: AVCapturePhotoCaptureDelegate { // photo stream
                    let rawFilter = CIRAWFilter(imageData: rawData, identifierHint: nil) {
                     // Let the RAW developer roll highlights into SDR before the LUT.
                     rawFilter.extendedDynamicRangeAmount = 0
+                    // A locked WB develops at that temperature; AWB keeps the as-shot neutral.
+                    if let kelvin = request.whiteBalanceKelvin {
+                        rawFilter.neutralTemperature = Float(kelvin)
+                        rawFilter.neutralTint = 0
+                    }
                     if let target = captureContext.previewStops {
-                        rawFilter.exposure = self.matchedRAWExposure(rawData, target: target)
+                        rawFilter.exposure = self.matchedRAWExposure(
+                            rawData, target: target, kelvin: request.whiteBalanceKelvin
+                        )
                     }
                     // CIRAWFilter already rotates the pixels to the stored orientation.
                     if let baseCIImage = rawFilter.outputImage,
@@ -780,8 +870,12 @@ extension SessionManager: AVCapturePhotoCaptureDelegate { // photo stream
     // stay out of the ZERO PROCESSING result.
     nonisolated static let rawExposureRange: ClosedRange<Float> = -2...3
 
-    private func matchedRAWExposure(_ rawData: Data, target: Float) -> Float {
+    private func matchedRAWExposure(_ rawData: Data, target: Float, kelvin: Int?) -> Float {
         guard let draft = CIRAWFilter(imageData: rawData, identifierHint: nil) else { return 0 }
+        if let kelvin {
+            draft.neutralTemperature = Float(kelvin)
+            draft.neutralTint = 0
+        }
         let longEdge = max(draft.nativeSize.width, draft.nativeSize.height)
         if longEdge > 0 { draft.scaleFactor = Float(min(1, 384 / longEdge)) }
         draft.extendedDynamicRangeAmount = 0

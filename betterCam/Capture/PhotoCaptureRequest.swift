@@ -9,4 +9,6 @@ struct PhotoCaptureRequest {
     let usesManualExposure: Bool
     let manualExposureDuration: CMTime?
     let manualISO: Float?
+    /// Locked colour temperature, or nil for AWB. ZERO PROCESSING develops the RAW with it.
+    var whiteBalanceKelvin: Int? = nil
 }

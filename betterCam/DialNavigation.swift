@@ -19,6 +19,13 @@ func adjustValue(for camera: Camera, direction: Int) {
     let lm = camera.lensManager
     
     switch camera.activeIndex {
+    case UIWidgets.WBMode.rawValue:
+        if camera.isEditingCustomKelvin {
+            pm.customKelvin = WhiteBalance.steppedKelvin(pm.customKelvin, direction: direction)
+        } else {
+            pm.WBMode = nextOption(in: WhiteBalance.modeOptions, current: pm.WBMode, direction: direction)
+        }
+
     case UIWidgets.AFMode.rawValue:
         pm.AFMode = nextOption(in: pm.AFModeOptions, current: pm.AFMode, direction: direction)
         

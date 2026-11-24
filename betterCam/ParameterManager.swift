@@ -18,7 +18,9 @@ class ParameterManager: ObservableObject {
     @Published var style: String = FilmEngine.standardName
     @Published var imageQuality: String = "JPEG"
     @Published var AFMode: String = "AF-C"
-    @Published var WBMode: String = "AWB"
+    @Published var WBMode: String = WhiteBalance.auto
+    /// The CUSTOM colour temperature. Kept across launches like a camera's custom WB slot.
+    @Published var customKelvin: Int = WhiteBalance.defaultCustomKelvin
     @Published var Aperture: String = "F1.8"
     @Published var aspectRatio: String = "4:3"
     @Published var currentFocalLength: Int = 26
@@ -48,6 +50,8 @@ class ParameterManager: ObservableObject {
     let prefs = UserDefaults(suiteName: ShutterManager.suiteName)
         
     private var cancellables = Set<AnyCancellable>()
+    private let WBModeKey = "WBMode"
+    private let customKelvinKey = "customKelvin"
     
     // 💡 新增：记录上一次的手动值，以及防死循环的“互斥锁”
     private var lastSS: String = "1/200"
@@ -58,6 +62,7 @@ class ParameterManager: ObservableObject {
         // 启动时自动加载
         syncAllLUTsToOptions()
         loadExposureParameters()
+        loadWhiteBalance()
         setupAutoSync()
         setupAutoModeLogic() // 💡 注册联动监听
     }
@@ -139,7 +144,30 @@ class ParameterManager: ObservableObject {
         if ISO != ExposureParameter.auto { lastISO = ISO }
     }
     
+    // The mode follows the "keep parameters" setting like SS and ISO; the CUSTOM
+    // temperature is always kept.
+    private func loadWhiteBalance() {
+        let storedKelvin = UserDefaults.standard.integer(forKey: customKelvinKey)
+        if storedKelvin > 0 { customKelvin = WhiteBalance.clampedKelvin(storedKelvin) }
+        if enablePermanentStorage, !perferAUTO,
+           let mode = UserDefaults.standard.string(forKey: WBModeKey),
+           WhiteBalance.modeOptions.contains(mode) {
+            WBMode = mode
+        }
+    }
+
+    private func saveWhiteBalance() {
+        UserDefaults.standard.set(customKelvin, forKey: customKelvinKey)
+        if enablePermanentStorage { UserDefaults.standard.set(WBMode, forKey: WBModeKey) }
+    }
+
     private func setupAutoSync() {
+        Publishers.CombineLatest($WBMode, $customKelvin)
+            .dropFirst()
+            .debounce(for: .seconds(1), scheduler: RunLoop.main)
+            .sink { [weak self] _, _ in self?.saveWhiteBalance() }
+            .store(in: &cancellables)
+
         // 监听所有可能需要存盘的参数
         Publishers.CombineLatest($SS, $ISO)
             .debounce(for: .seconds(1), scheduler: RunLoop.main)

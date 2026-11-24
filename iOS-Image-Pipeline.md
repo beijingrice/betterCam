@@ -49,7 +49,21 @@ takePhoto ─► PhotoCaptureRequest（画质、分辨率、风格快照、曝�
    - 用 `CIRenderDestination` 渲染到 `bgra8Unorm` 的 Display P3 drawable；最多同时有 2 帧在 GPU 上排队。
 6. **什么时候套风格。** 只有画质会保存 JPEG（`JPEG` 或 `DNG+J`）时才套风格和颗粒；`DNG` 和 `ProRAW` 模式下取景器显示原始视频画面。
 7. **视频 HDR。** 只有同时满足三个条件才打开：自动曝光、ZERO PROCESSING 关闭、画质会保存 JPEG。
-8. **手势。** 左右拖动调风格强度（`lutIntensity`），上下拖动调颗粒强度（`grainIntensity`）。选 STD 或 MANAGE、或者画质不保存 JPEG 时，手势不生效。点击对焦根据预览帧的尺寸和镜像状态换算坐标。
+8. **白平衡。** 见第 1.1 节。白平衡由相机的 ISP 应用，所以取景器、波形图和直方图看到的都是已经套用白平衡的画面。
+9. **手势。** 左右拖动调风格强度（`lutIntensity`），上下拖动调颗粒强度（`grainIntensity`）。选 STD 或 MANAGE、或者画质不保存 JPEG 时，手势不生效。点击对焦根据预览帧的尺寸和镜像状态换算坐标。
+
+### 1.1 白平衡
+
+代码：`Capture/WhiteBalance.swift`、`Camera.toggleWhiteBalanceAdjustment / applyWhiteBalance`、`SessionManager.updateWhiteBalance`
+
+- **选项**（顶栏 WB，转盘循环）：`AWB → TUNG 3200K → FLUOR 4000K → DAY 5500K → CLOUD 6500K → SHADE 7500K → CUSTOM`。
+- **CUSTOM：** 停在 CUSTOM 上按中心键，顶栏改为显示 K 值（如 `5500K`），转盘每格 ±100K，范围 2500–10000K，不循环。编辑 K 值时转盘每 15° 走一格（其他参数是 45°）。再按中心键确认，回到选项列表，显示 `CUSTOM`；再按一次退出。点别的参数或转到别的位置会直接结束编辑，保留已调到的 K 值。
+- **保存：** CUSTOM 的 K 值总是保存（`customKelvin`）；当前模式（`WBMode`）和 SS/ISO 一样，只在打开"保留参数"时保存，并且 `perferAUTO` 打开时启动回到 AWB。
+- **锁定：** K 值加色调 0，用 `deviceWhiteBalanceGains(for:)` 换算成设备增益，先按最小值归一到 1（保持比例，也就是颜色），再把每个通道限制到 `1…maxWhiteBalanceGain`，然后 `setWhiteBalanceModeLocked`。增益是每颗镜头各自的，所以存的是 K 值，切换镜头后（`refreshLensCapabilities`）重新换算。不支持自定义增益的镜头（部分前置）保持 AWB。
+- **跟随转盘：** `Camera.bindWhiteBalance` 用 Combine 推送来的新值计算 K 值。`@Published` 在属性真正改变之前就通知，如果在回调里再去读 `parameterManager.WBMode`，拿到的是上一个档位：以前每次请求都慢一格，从 TUNG 往回转到 AWB 时相机仍锁在 3200K，画面一直偏蓝。
+- **防止迟到的锁定：** 自定义增益要过一帧或更久才生效。每次请求记一个序号，锁定完成时如果已经有更新的请求，就把最新状态重新应用一次（每个请求最多一次）；切回 AWB 时先经过 `.locked` 再设 `.continuousAutoWhiteBalance`，保证 AWB 重新开始。这是防御性的处理，真机日志里没有观察到迟到的锁定。
+- **调试日志：** Debug 版每次请求 1.5 秒后打印 `[WB #序号 after 1.5s] requested … | device … | gains … | ≈ K tint`，对比请求和相机实际状态。
+- **限制：** 很低或很高的色温需要的增益可能超过设备上限，超出部分被截断，颜色到那里就不再变化。
 
 ---
 
@@ -63,6 +77,7 @@ takePhoto ─► PhotoCaptureRequest（画质、分辨率、风格快照、曝�
 
 - 同时在处理的照片数：48MP 最多 1 张，其他最多 3 张。
 - 手动曝光：先设好自定义快门和 ISO，等设备确认生效后再拍。
+- 白平衡：锁定时 request 带上 K 值（`whiteBalanceKelvin`），AWB 时为空。
 - 照片方向取自陀螺仪（`motionManager.deviceOrientation`）；前置镜头的照片会镜像。
 
 ### 2.2 画质模式
@@ -99,6 +114,7 @@ takePhoto ─► PhotoCaptureRequest（画质、分辨率、风格快照、曝�
    - ZERO PROCESSING：`CIRAWFilter` 输出的像素已经转正，所以写 JPEG 时方向标签改成 1。
    - ZERO PROCESSING 亮度同步：按快门时记下取景画面的多区测光读数（取景器一直在后台每秒约 15 次测量，不管测光显示是否打开）。显影前先用约 384px 的草稿显影测同样的读数，调 `CIRAWFilter.exposure` 让两者一致（校正两次，范围 −2…+3 EV）。只同步整体亮度；降噪、锐化和局部色调映射仍然不加。
    - ZERO PROCESSING：`CIRAWFilter` 显影 Bayer RAW，并设置 `extendedDynamicRangeAmount = 0`，让 RAW 显影器自己把高光压进 SDR。
+   - ZERO PROCESSING 白平衡：锁定白平衡时设置 `neutralTemperature = K`、`neutralTint = 0`（亮度同步用的草稿显影也一样）；AWB 时沿用 RAW 里记录的拍摄白点。处理后照片（HEVC）的白平衡由 ISP 应用，不需要另外处理；保存的 DNG / ProRAW 像素不受白平衡影响，后期仍可重新调整。
 2. **压到 SDR。** 如果底图带 HDR headroom，先 tone map 到 SDR。
 3. **套风格和颗粒。** 调用 `FilmEngine.process`。颗粒种子由 captureID 算出，所以每张照片的颗粒图案都不一样。
 4. **输出。** 在扩展线性 sRGB 工作空间里计算，导出成 RGBA8 Display P3 的 `CGImage`。风格本身在 sRGB 里制作，但没套风格或强度不满的部分保留相机的广色域。
@@ -204,6 +220,9 @@ Metal kernel `betterCamGrain` 对每个像素的处理：
 - **拍第一张会卡。** 所有模式都预先准备拍摄设置，并预热成片处理。ZERO PROCESSING 的 `CIRAWFilter` 无法预热（需要真实 RAW 数据），第一张可能仍比后面慢一点。
 - **高饱和颜色上的颗粒色偏。** kernel 改为三通道同比例缩放。
 - **颗粒 kernel 加载失败没有日志。** 现在记录 fault 日志，Debug 版本会断言；新增测试检查 kernel 能加载。
+
+**待真机确认：**
+- **白平衡。** 取景器、普通 JPEG、ZERO PROCESSING 成片在同一 K 值下颜色是否一致；`CIRAWFilter` 的色温和 AVFoundation 的色温理论上是同一标尺，但没有在真机上对比过。前置镜头是否支持自定义增益；切换镜头后白平衡是否保持。
 
 **有意保留的设计：**
 - **ZERO PROCESSING 的取景器和成片仍有局部差异。** 整体亮度已经自动同步，但取景器是 ISP 的渲染，有局部色调映射（暗部被局部提亮）；成片没有这一层，所以大光比场景里暗部仍会比取景器暗一些、对比更高，锐度和噪点也不同。

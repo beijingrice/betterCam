@@ -19,8 +19,15 @@ class Camera: NSObject, ObservableObject {
     private var cancellables = Set<AnyCancellable>()
     
     // MARK: - UI 交互状态
-    @Published var activeIndex: Int = 0
-    @Published var isAdjustingValue: Bool = false
+    @Published var activeIndex: Int = 0 {
+        didSet { if activeIndex != oldValue { isEditingCustomKelvin = false } }
+    }
+    @Published var isAdjustingValue: Bool = false {
+        didSet { if !isAdjustingValue { isEditingCustomKelvin = false } }
+    }
+    /// The WB dial is on CUSTOM and turning it changes the colour temperature.
+    /// Leaving the WB control any other way keeps the temperature reached so far.
+    @Published var isEditingCustomKelvin: Bool = false
     @Published var exposureIndicatorMode: ExposureMode = .off {
         didSet {
             MetalWHProcessor.shared.setMode(exposureIndicatorMode)
@@ -115,6 +122,7 @@ class Camera: NSObject, ObservableObject {
 
         bindLensSelection()
         bindExposureControls()
+        bindWhiteBalance()
         bindCaptureSettings()
         bindFilmLook()
         bindFocusAndSound()
@@ -200,6 +208,27 @@ class Camera: NSObject, ObservableObject {
             }
             .store(in: &cancellables)
             
+    }
+
+    private func bindWhiteBalance() {
+        Publishers.CombineLatest(parameterManager.$WBMode, parameterManager.$customKelvin)
+            .removeDuplicates { $0 == $1 }
+            // @Published fires before the property changes, so use the delivered values;
+            // reading parameterManager here would apply the previous dial position.
+            .sink { [weak self] mode, kelvin in
+                self?.applyWhiteBalance(WhiteBalance.kelvin(for: mode, customKelvin: kelvin))
+            }
+            .store(in: &cancellables)
+    }
+
+    var whiteBalanceKelvin: Int? {
+        WhiteBalance.kelvin(for: parameterManager.WBMode, customKelvin: parameterManager.customKelvin)
+    }
+
+    /// White balance gains are per device, so this also runs after every lens change.
+    private func applyWhiteBalance(_ kelvin: Int?) {
+        guard let device = lensManager.currentLens?.device else { return }
+        sessionManager.updateWhiteBalance(kelvin: kelvin, device: device)
     }
 
     private func bindCaptureSettings() {
@@ -357,6 +386,7 @@ class Camera: NSObject, ObservableObject {
             lensManager.physicalLenses[index] = lens
         }
         updateUIWithLens(lens)
+        applyWhiteBalance(whiteBalanceKelvin)
     }
     
     // 💡 一个辅助函数，把镜头的物理属性传递给参数管家
@@ -401,7 +431,8 @@ class Camera: NSObject, ObservableObject {
             ),
             usesManualExposure: isManualExposureActive,
             manualExposureDuration: manualDuration,
-            manualISO: manualISO
+            manualISO: manualISO,
+            whiteBalanceKelvin: whiteBalanceKelvin
         )
         sessionManager.capturePhoto(
             orientation: motionManager.deviceOrientation,
@@ -417,16 +448,35 @@ class Camera: NSObject, ObservableObject {
     }
     
     func toggleAdjustmentMode() {
-        if activeIndex != nullWidgetIndex && activeIndex != UIWidgets.Style.rawValue { isAdjustingValue.toggle() }
-        if activeIndex == UIWidgets.Style.rawValue {
-            isAdjustingValue = !isAdjustingValue
+        switch activeIndex {
+        case nullWidgetIndex:
+            break
+        case UIWidgets.Style.rawValue:
+            isAdjustingValue.toggle()
             if parameterManager.style == "MANAGE" && !isAdjustingValue { inCameraView = false }
-        }
-        if activeIndex == UIWidgets.MENU.rawValue {
+        case UIWidgets.MENU.rawValue:
             if !isAdjustingValue { isAdjustingValue = true }
             else { isShowingMenu = true; isAdjustingValue = false }
+        case UIWidgets.WBMode.rawValue:
+            toggleWhiteBalanceAdjustment()
+        default:
+            isAdjustingValue.toggle()
         }
         selectFeedback.impactOccurred()
+    }
+
+    /// Centre button on WB: enter the list → on CUSTOM, edit the temperature → confirm
+    /// back to the list (showing CUSTOM) → leave.
+    private func toggleWhiteBalanceAdjustment() {
+        if !isAdjustingValue {
+            isAdjustingValue = true
+        } else if isEditingCustomKelvin {
+            isEditingCustomKelvin = false
+        } else if parameterManager.WBMode == WhiteBalance.custom {
+            isEditingCustomKelvin = true
+        } else {
+            isAdjustingValue = false
+        }
     }
     
     func manageSession() {

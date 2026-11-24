@@ -26,7 +26,10 @@ struct TopBarView: View {
                 Spacer()
                 ParameterItem(title: pm.AFMode, index: UIWidgets.AFMode.rawValue)
                 Spacer()
-                ParameterItem(title: pm.WBMode, index: UIWidgets.WBMode.rawValue)
+                ParameterItem(
+                    title: camera.isEditingCustomKelvin ? WhiteBalance.kelvinLabel(pm.customKelvin) : pm.WBMode,
+                    index: UIWidgets.WBMode.rawValue
+                )
                 Spacer()
                 ParameterItem(title: "MENU", index: UIWidgets.MENU.rawValue)
             }
